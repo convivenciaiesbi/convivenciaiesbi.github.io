@@ -371,12 +371,37 @@ El Amrani Youssef,4º ESO D`;
 
   const handleCreateSnapshot = () => {
     setIsBackingUp(true);
+    setBackupMessage(null);
     setTimeout(() => {
-      const id = StorageService.crearSnapshotBackup(currentUser.email);
-      setIsBackingUp(false);
-      setBackupMessage(`Instantánea de seguridad generada con éxito: ${id}. Almacenada en Drive.`);
-      onImportCompleted();
-    }, 600);
+      try {
+        const id = StorageService.crearSnapshotBackup(currentUser.email);
+        const payload = GoogleDriveSyncService.getFullDatabasePayload();
+        const jsonStr = JSON.stringify(payload, null, 2);
+        const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_SNAPSHOT_${new Date().toISOString().split('T')[0]}.json`;
+
+        // Descarga de archivo automática
+        const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.setAttribute('download', filename);
+        document.body.appendChild(a);
+        a.click();
+
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 2000);
+
+        setIsBackingUp(false);
+        setBackupMessage(`✅ Instantánea descargada con éxito como "${filename}" (${id}). Contiene ${payload.alumnos.length} alumnos, ${payload.sanciones.length} partes disciplinarios y claustro.`);
+        onImportCompleted();
+      } catch (err: any) {
+        setIsBackingUp(false);
+        setBackupMessage(`⚠️ Error al generar copia: ${err.message || err}`);
+      }
+    }, 400);
   };
 
   const handleConfirmarVaciar = () => {
@@ -816,10 +841,11 @@ El Amrani Youssef,4º ESO D`;
             <button
               onClick={handleCreateSnapshot}
               disabled={isBackingUp}
-              className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-950 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-950 text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-2xs"
+              title="Genera y descarga un archivo .JSON con la base de datos completa a tu equipo"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isBackingUp ? 'animate-spin' : ''}`} />
-              <span>{isBackingUp ? 'Guardando Backup...' : 'Crear Snapshot Backup (02:00h)'}</span>
+              <Download className={`w-3.5 h-3.5 text-emerald-700 ${isBackingUp ? 'animate-bounce' : ''}`} />
+              <span>{isBackingUp ? 'Generando y descargando...' : 'Descargar Snapshot Backup (.JSON)'}</span>
             </button>
 
             <button
@@ -835,8 +861,8 @@ El Amrani Youssef,4º ESO D`;
         </div>
 
         {backupMessage && (
-          <div className="mt-3 p-3 bg-sky-50/80 border border-sky-200 rounded-xl text-xs text-sky-950 flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-sky-700 shrink-0" />
+          <div className="mt-3 p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-950 font-medium flex items-center gap-2 shadow-2xs animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
             <span>{backupMessage}</span>
           </div>
         )}

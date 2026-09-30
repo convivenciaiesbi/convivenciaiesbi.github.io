@@ -161,6 +161,19 @@ export default function App() {
   useEffect(() => {
     refreshAllData();
 
+    // Canal de sincronización instantánea entre pestañas abiertas en el mismo navegador
+    let broadcastChannel: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        broadcastChannel = new BroadcastChannel('sigc_bi_realtime_sync');
+        broadcastChannel.onmessage = (event) => {
+          if (event.data?.type === 'DATA_UPDATED') {
+            refreshAllData();
+          }
+        };
+      }
+    } catch {}
+
     // 1. Sincronización inmediata al arrancar
     const syncFromDrive = () => {
       GoogleDriveSyncService.pullFromGoogleDrive()
@@ -179,17 +192,23 @@ export default function App() {
 
     // 3. Sincronización inmediata cuando la pestaña recupera el foco, cambia la visibilidad o vuelve la conexión
     const handleQuickSync = () => {
+      refreshAllData();
       syncFromDrive();
     };
     window.addEventListener('focus', handleQuickSync);
     window.addEventListener('visibilitychange', handleQuickSync);
     window.addEventListener('online', handleQuickSync);
+    window.addEventListener('storage', handleQuickSync);
 
     return () => {
       clearInterval(intervalId);
+      if (broadcastChannel) {
+        broadcastChannel.close();
+      }
       window.removeEventListener('focus', handleQuickSync);
       window.removeEventListener('visibilitychange', handleQuickSync);
       window.removeEventListener('online', handleQuickSync);
+      window.removeEventListener('storage', handleQuickSync);
     };
   }, []);
 
@@ -236,6 +255,16 @@ export default function App() {
     setCurrentView(view);
   };
 
+  const notifyLocalSync = () => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const bc = new BroadcastChannel('sigc_bi_realtime_sync');
+        bc.postMessage({ type: 'DATA_UPDATED', timestamp: Date.now() });
+        bc.close();
+      }
+    } catch {}
+  };
+
   // Submission handler for Fast Parte Modal (<30s)
   const handleImponerSancion = (
     sancionData: Omit<Sancion, 'id_sancion' | 'numero_expediente' | 'url_pdf_drive'>
@@ -243,6 +272,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     const result = StorageService.imponerSancion(sancionData, userEmail);
     refreshAllData();
+    notifyLocalSync();
     // Auto-sincronización transparente ultrarrápida en segundo plano con Google Drive
     GoogleDriveSyncService.triggerFastSync(100);
     return result;
@@ -257,6 +287,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     StorageService.actualizarTramitacion(idSancion, nuevoEstado, observaciones, userEmail);
     refreshAllData();
+    notifyLocalSync();
     GoogleDriveSyncService.triggerFastSync(200);
   };
 
@@ -269,6 +300,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     StorageService.actualizarEstadoPAC(idSancion, nuevoEstadoPAC, profesorReceptor, userEmail);
     refreshAllData();
+    notifyLocalSync();
     GoogleDriveSyncService.triggerFastSync(200);
   };
 
@@ -279,6 +311,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     StorageService.registrarCompensacion(compData, userEmail);
     refreshAllData();
+    notifyLocalSync();
     GoogleDriveSyncService.triggerFastSync(200);
   };
 
@@ -287,6 +320,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     const result = StorageService.eliminarSancion(idSancion, userEmail, motivo);
     refreshAllData();
+    notifyLocalSync();
     GoogleDriveSyncService.triggerFastSync(100);
     return result;
   };
@@ -296,6 +330,7 @@ export default function App() {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
     StorageService.resetToSeed(userEmail);
     refreshAllData();
+    notifyLocalSync();
     GoogleDriveSyncService.triggerFastSync(0);
     setDriveModalOpen(false);
   };

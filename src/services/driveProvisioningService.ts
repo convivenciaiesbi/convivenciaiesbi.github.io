@@ -398,18 +398,38 @@ function guardarBaseDatosEnDrive(incomingData) {
       if (currentContent && currentContent.length > 10) {
         var currentData = JSON.parse(currentContent);
         
-        // Fusionar sanciones que pudieran existir en el archivo y no en la petición entrante
+        // Unificar listas de IDs eliminados (tombstones)
+        var deletedSancionMap = {};
+        (finalData.deleted_sanciones || []).forEach(function(id) { deletedSancionMap[id] = true; });
+        (currentData.deleted_sanciones || []).forEach(function(id) { deletedSancionMap[id] = true; });
+        finalData.deleted_sanciones = Object.keys(deletedSancionMap);
+
+        var deletedAlumnoMap = {};
+        (finalData.deleted_alumnos || []).forEach(function(id) { deletedAlumnoMap[id] = true; });
+        (currentData.deleted_alumnos || []).forEach(function(id) { deletedAlumnoMap[id] = true; });
+        finalData.deleted_alumnos = Object.keys(deletedAlumnoMap);
+
+        var deletedProfMap = {};
+        (finalData.deleted_profesores || []).forEach(function(id) { deletedProfMap[id] = true; });
+        (currentData.deleted_profesores || []).forEach(function(id) { deletedProfMap[id] = true; });
+        finalData.deleted_profesores = Object.keys(deletedProfMap);
+
+        // 1. Filtrar y fusionar sanciones descartando cualquier ID eliminada oficialmente
+        finalData.sanciones = (finalData.sanciones || []).filter(function(s) {
+          return s && s.id_sancion && !deletedSancionMap[s.id_sancion];
+        });
+
         if (currentData.sanciones && Array.isArray(currentData.sanciones)) {
           var incomingSancionIds = {};
-          (finalData.sanciones || []).forEach(function(s) { if (s && s.id_sancion) incomingSancionIds[s.id_sancion] = true; });
+          finalData.sanciones.forEach(function(s) { incomingSancionIds[s.id_sancion] = true; });
           currentData.sanciones.forEach(function(existingS) {
-            if (existingS && existingS.id_sancion && !incomingSancionIds[existingS.id_sancion]) {
+            if (existingS && existingS.id_sancion && !incomingSancionIds[existingS.id_sancion] && !deletedSancionMap[existingS.id_sancion]) {
               finalData.sanciones.push(existingS);
             }
           });
         }
 
-        // Fusionar compensaciones
+        // 2. Fusionar compensaciones
         if (currentData.compensaciones && Array.isArray(currentData.compensaciones)) {
           var incomingCompIds = {};
           (finalData.compensaciones || []).forEach(function(c) { if (c && c.id_compensacion) incomingCompIds[c.id_compensacion] = true; });
@@ -420,7 +440,7 @@ function guardarBaseDatosEnDrive(incomingData) {
           });
         }
 
-        // Fusionar credenciales de contraseñas de docentes (para que nunca se pierdan entre equipos)
+        // 3. Fusionar credenciales de contraseñas de docentes (para que nunca se pierdan entre equipos)
         if (currentData.credenciales_profesores && typeof currentData.credenciales_profesores === 'object') {
           if (!finalData.credenciales_profesores) finalData.credenciales_profesores = {};
           for (var emailKey in currentData.credenciales_profesores) {

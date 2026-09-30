@@ -19,6 +19,10 @@ const KEY_UNIDAD_INSTITUCIONAL = 'sigc_bi_unidad_institucional_v2';
 const KEY_CURSO_ACTUAL = 'sigc_bi_curso_actual_v1';
 const KEY_HISTORICO_CURSOS = 'sigc_bi_historico_cursos_v1';
 const KEY_LAST_LOCAL_WRITE = 'sigc_bi_last_local_write_timestamp_v1';
+const KEY_DELETED_SANCIONES = 'sigc_bi_deleted_sanciones_v1';
+const KEY_DELETED_ALUMNOS = 'sigc_bi_deleted_alumnos_v1';
+const KEY_DELETED_PROFESORES = 'sigc_bi_deleted_profesores_v1';
+const KEY_PENDING_SYNC_SANCIONES = 'sigc_bi_pending_sync_sanciones_v1';
 
 // Limpieza automática inmediata para asegurar que alumnos y partes queden a cero, y purgar docentes en baja
 try {
@@ -1081,6 +1085,117 @@ export class StorageService {
     this.touchLocalWriteTimestamp();
   }
 
+  // --- RECONCILIACIÓN Y REGISTRO DE ELEMENTOS ELIMINADOS (TOMBSTONES) ---
+  static getDeletedSancionIds(): string[] {
+    try {
+      const raw = localStorage.getItem(KEY_DELETED_SANCIONES);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveDeletedSancionIds(ids: string[]): void {
+    const unique = Array.from(new Set(ids)).slice(-500);
+    localStorage.setItem(KEY_DELETED_SANCIONES, JSON.stringify(unique));
+  }
+
+  static addDeletedSancionId(id: string): void {
+    if (!id) return;
+    const current = this.getDeletedSancionIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      this.saveDeletedSancionIds(current);
+    }
+    this.removePendingSyncSancionId(id);
+  }
+
+  static removeDeletedSancionId(id: string): void {
+    const current = this.getDeletedSancionIds().filter(i => i !== id);
+    this.saveDeletedSancionIds(current);
+  }
+
+  static getPendingSyncSancionIds(): string[] {
+    try {
+      const raw = localStorage.getItem(KEY_PENDING_SYNC_SANCIONES);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static savePendingSyncSancionIds(ids: string[]): void {
+    localStorage.setItem(KEY_PENDING_SYNC_SANCIONES, JSON.stringify(Array.from(new Set(ids))));
+  }
+
+  static addPendingSyncSancionId(id: string): void {
+    if (!id) return;
+    const current = this.getPendingSyncSancionIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      this.savePendingSyncSancionIds(current);
+    }
+  }
+
+  static removePendingSyncSancionId(id: string): void {
+    const current = this.getPendingSyncSancionIds().filter(i => i !== id);
+    this.savePendingSyncSancionIds(current);
+  }
+
+  static clearPendingSyncSancionIds(idsToRemove?: string[]): void {
+    if (!idsToRemove || idsToRemove.length === 0) {
+      localStorage.removeItem(KEY_PENDING_SYNC_SANCIONES);
+    } else {
+      const set = new Set(idsToRemove);
+      const remaining = this.getPendingSyncSancionIds().filter(i => !set.has(i));
+      this.savePendingSyncSancionIds(remaining);
+    }
+  }
+
+  static getDeletedAlumnoIds(): string[] {
+    try {
+      const raw = localStorage.getItem(KEY_DELETED_ALUMNOS);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveDeletedAlumnoIds(ids: string[]): void {
+    localStorage.setItem(KEY_DELETED_ALUMNOS, JSON.stringify(Array.from(new Set(ids)).slice(-500)));
+  }
+
+  static addDeletedAlumnoId(id: string): void {
+    if (!id) return;
+    const current = this.getDeletedAlumnoIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      this.saveDeletedAlumnoIds(current);
+    }
+  }
+
+  static getDeletedProfesorIds(): string[] {
+    try {
+      const raw = localStorage.getItem(KEY_DELETED_PROFESORES);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveDeletedProfesorIds(ids: string[]): void {
+    localStorage.setItem(KEY_DELETED_PROFESORES, JSON.stringify(Array.from(new Set(ids)).slice(-200)));
+  }
+
+  static addDeletedProfesorId(id: string): void {
+    if (!id) return;
+    const current = this.getDeletedProfesorIds();
+    if (!current.includes(id)) {
+      current.push(id);
+      this.saveDeletedProfesorIds(current);
+    }
+  }
+
   static getCompensaciones(): Compensacion[] {
     const raw = localStorage.getItem(KEY_COMPENSACIONES);
     if (!raw) {
@@ -1225,6 +1340,10 @@ export class StorageService {
       saldo_resultante: nuevosPuntos,
     };
 
+    // Registrar para sincronización y asegurar que no esté en la lista de eliminados
+    this.removeDeletedSancionId(idSancion);
+    this.addPendingSyncSancionId(idSancion);
+
     const sanciones = this.getSanciones();
     sanciones.unshift(nuevaSancion);
     this.saveSanciones(sanciones);
@@ -1320,6 +1439,9 @@ export class StorageService {
         });
       }
     }
+
+    // Registrar el ID de la sanción como eliminada para que ningún otro dispositivo la resucite
+    this.addDeletedSancionId(idSancion);
 
     // Retirar la sanción
     sanciones.splice(sancionIdx, 1);
@@ -1857,6 +1979,15 @@ export class StorageService {
    * Elimina a todos los alumnos y partes disciplinarios generados
    */
   static vaciarAlumnosYSanciones(usuarioEmail: string): void {
+    const prevSanciones = this.getSanciones();
+    prevSanciones.forEach(s => {
+      if (s?.id_sancion) this.addDeletedSancionId(s.id_sancion);
+    });
+    const prevAlumnos = this.getAlumnos();
+    prevAlumnos.forEach(a => {
+      if (a?.id_alumno) this.addDeletedAlumnoId(a.id_alumno);
+    });
+
     this.saveAlumnos([]);
     this.saveSanciones([]);
     this.saveCompensaciones([]);
@@ -1873,6 +2004,9 @@ export class StorageService {
    * Reset database back to seed for demo or test purposes
    */
   static resetToSeed(usuarioEmail: string): void {
+    this.saveDeletedSancionIds([]);
+    this.saveDeletedAlumnoIds([]);
+    this.clearPendingSyncSancionIds();
     this.saveAlumnos(ALUMNOS_INICIALES);
     this.saveSanciones(SANCIONES_INICIALES);
     this.saveCompensaciones(COMPENSACIONES_INICIALES);
