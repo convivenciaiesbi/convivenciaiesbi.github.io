@@ -25,7 +25,9 @@ import {
   ShieldCheck,
   FileText,
   UserCog,
-  GraduationCap
+  GraduationCap,
+  Users,
+  Laptop
 } from 'lucide-react';
 import { Profesor } from '../types/convivencia';
 import { AuthService } from '../services/authService';
@@ -64,6 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isSyncingNow, setIsSyncingNow] = useState(false);
 
   const isAdmin = AuthService.isAdmin(currentUser);
+  const isShared = AuthService.isSharedSession();
   const navItems = AuthService.getAllowedNavItems(currentUser);
 
   // Friendly role descriptions
@@ -329,6 +332,27 @@ export const Header: React.FC<HeaderProps> = ({
                       <div className="pt-2 border-t border-sky-200/50 text-[11px] text-slate-600 leading-snug">
                         {currentRole.detail}
                       </div>
+
+                      {/* Modo de Seguridad de Equipo (RGPD) */}
+                      <div className={`mt-2 p-2 rounded-lg text-xs flex items-center justify-between border ${
+                        isShared 
+                          ? 'bg-amber-50/90 border-amber-200 text-amber-900' 
+                          : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}>
+                        <div className="flex items-center gap-1.5">
+                          {isShared ? (
+                            <Users className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          ) : (
+                            <Laptop className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                          )}
+                          <span className="font-semibold text-[11px]">
+                            {isShared ? 'Equipo compartido (Auto-cierre 15m)' : 'Equipo personal privado'}
+                          </span>
+                        </div>
+                        <span className="text-[9px] font-mono px-1 py-0.2 rounded font-bold bg-white/90 border border-current">
+                          {isShared ? 'Seguro' : 'Frecuente'}
+                        </span>
+                      </div>
                     </div>
 
                     {/* User Details & Institutional Department */}
@@ -407,6 +431,17 @@ export const Header: React.FC<HeaderProps> = ({
                 </>
               )}
             </div>
+
+            {/* Botón directo de Cerrar Sesión para agilidad y seguridad inmediata en sala de profesores */}
+            <button
+              type="button"
+              onClick={onLogout}
+              title={isShared ? "Cerrar sesión ahora (Equipo compartido del centro)" : "Cerrar sesión"}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:text-rose-950 bg-rose-50 hover:bg-rose-100/90 border border-rose-200/90 rounded-xl transition-all cursor-pointer shadow-2xs"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span className="hidden sm:inline">Cerrar Sesión</span>
+            </button>
 
             {/* Mobile Menu Hamburger Button */}
             <div className="lg:hidden">

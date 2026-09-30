@@ -7,8 +7,19 @@ import { Profesor } from '../types/convivencia';
 import { StorageService } from './storageService';
 
 const SESSION_KEY = 'sigc_bi_auth_user_v2';
+const SESSION_TYPE_KEY = 'sigc_bi_session_type_v1';
+const LAST_ACTIVITY_KEY = 'sigc_bi_last_activity_v1';
+const LOGOUT_REASON_KEY = 'sigc_bi_logout_reason_v1';
 const CREDENTIALS_HASH_KEY = 'sigc_bi_teacher_hashes_v3';
 const GOOGLE_CLIENT_ID_KEY = 'sigc_bi_google_oauth_client_id_v1';
+
+/**
+ * Tiempos límite de inactividad para garantizar el cumplimiento del RGPD / ENS
+ * en centros educativos donde los ordenadores se comparten en salas de profesores y aulas.
+ */
+export const INACTIVITY_LIMIT_SHARED_MS = 15 * 60 * 1000; // 15 minutos en equipos compartidos
+export const INACTIVITY_LIMIT_PERSONAL_MS = 8 * 60 * 60 * 1000; // 8 horas en equipos personales
+export const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Aviso preventivo 60 segundos antes de cerrar
 
 /**
  * Standard NIST SHA-256 implementation in pure TypeScript
@@ -94,12 +105,157 @@ function sha256Hex(ascii: string): string {
 
 export class AuthService {
   /**
-   * Retrieves the currently logged in user from localStorage, or null if unauthenticated.
+   * Guarda de forma segura la sesión del usuario.
+   * - En equipos compartidos (por defecto): Se almacena en sessionStorage para que la sesión se
+   *   destruya automáticamente en cuanto se cierre la pestaña o el navegador, y se activa el límite
+   *   estricto de inactividad de 15 minutos (RGPD / ENS).
+   * - En equipos personales: Se almacena en localStorage con caducidad prolongada.
+   */
+  static persistSession(user: Profesor, isShared: boolean = true): void {
+    try {
+      const userJson = JSON.stringify(user);
+      const nowStr = Date.now().toString();
+      const typeStr = isShared ? 'shared' : 'personal';
+
+      if (isShared) {
+        sessionStorage.setItem(SESSION_KEY, userJson);
+        sessionStorage.setItem(SESSION_TYPE_KEY, typeStr);
+        sessionStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
+
+        // Limpiar cualquier persistencia previa en localStorage para evitar fugas en este equipo
+        localStorage.removeItem(SESSION_KEY);
+        localStorage.removeItem(SESSION_TYPE_KEY);
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
+      } else {
+        localStorage.setItem(SESSION_KEY, userJson);
+        localStorage.setItem(SESSION_TYPE_KEY, typeStr);
+        localStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
+
+        sessionStorage.removeItem(SESSION_KEY);
+        sessionStorage.removeItem(SESSION_TYPE_KEY);
+        sessionStorage.removeItem(LAST_ACTIVITY_KEY);
+      }
+    } catch (e) {
+      console.error('Error persistiendo sesión de usuario:', e);
+    }
+  }
+
+  /**
+   * Devuelve si la sesión actual corresponde a un equipo compartido (sala de profesores, aula, etc.)
+   */
+  static isSharedSession(): boolean {
+    try {
+      const sessionType = sessionStorage.getItem(SESSION_TYPE_KEY) || localStorage.getItem(SESSION_TYPE_KEY);
+      if (sessionType === 'personal') return false;
+      return true; // Seguro por defecto: si no está definido, se asume compartido
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Registra actividad reciente del usuario (movimiento de ratón, pulsación de tecla, clic).
+   * Se invoca periódicamente desde la interfaz para refrescar el tiempo de inactividad.
+   */
+  static recordActivity(): void {
+    try {
+      const nowStr = Date.now().toString();
+      if (sessionStorage.getItem(SESSION_KEY)) {
+        sessionStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
+      }
+      if (localStorage.getItem(SESSION_KEY)) {
+        localStorage.setItem(LAST_ACTIVITY_KEY, nowStr);
+      }
+    } catch {
+      // Ignorar fallos de cuota o modo privado
+    }
+  }
+
+  /**
+   * Obtiene el estado actual de la sesión, comprobando si ha caducado por inactividad.
+   */
+  static getSessionStatus(): {
+    isAuthenticated: boolean;
+    isShared: boolean;
+    remainingSeconds: number;
+    showWarning: boolean;
+    limitMs: number;
+  } {
+    try {
+      const isShared = this.isSharedSession();
+      const limit = isShared ? INACTIVITY_LIMIT_SHARED_MS : INACTIVITY_LIMIT_PERSONAL_MS;
+
+      const hasSession = Boolean(sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY));
+      const lastActivityRaw = sessionStorage.getItem(LAST_ACTIVITY_KEY) || localStorage.getItem(LAST_ACTIVITY_KEY);
+
+      if (!hasSession || !lastActivityRaw) {
+        return {
+          isAuthenticated: false,
+          isShared,
+          remainingSeconds: 0,
+          showWarning: false,
+          limitMs: limit,
+        };
+      }
+
+      const lastActivity = parseInt(lastActivityRaw, 10);
+      const now = Date.now();
+      const elapsed = Math.max(0, now - (isNaN(lastActivity) ? now : lastActivity));
+      const remainingMs = Math.max(0, limit - elapsed);
+      const remainingSeconds = Math.ceil(remainingMs / 1000);
+
+      return {
+        isAuthenticated: true,
+        isShared,
+        remainingSeconds,
+        showWarning: remainingMs > 0 && remainingMs <= WARNING_BEFORE_LOGOUT_MS,
+        limitMs: limit,
+      };
+    } catch {
+      return {
+        isAuthenticated: false,
+        isShared: true,
+        remainingSeconds: 0,
+        showWarning: false,
+        limitMs: INACTIVITY_LIMIT_SHARED_MS,
+      };
+    }
+  }
+
+  /**
+   * Recupera el usuario autenticado actualmente.
+   * Si la sesión ha superado el tiempo máximo de inactividad, la destruye automáticamente
+   * y devuelve null (desconectando al usuario según RGPD).
    */
   static getCurrentUser(): Profesor | null {
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
+      // 1. Prioridad: sessionStorage (equipo compartido)
+      let raw = sessionStorage.getItem(SESSION_KEY);
+      let isShared = true;
+
+      if (raw) {
+        isShared = true;
+      } else {
+        // 2. Comprobar en localStorage (equipo personal)
+        raw = localStorage.getItem(SESSION_KEY);
+        isShared = localStorage.getItem(SESSION_TYPE_KEY) !== 'personal';
+      }
+
       if (!raw) return null;
+
+      // 3. Comprobar inactividad
+      const lastActivityRaw = sessionStorage.getItem(LAST_ACTIVITY_KEY) || localStorage.getItem(LAST_ACTIVITY_KEY);
+      const now = Date.now();
+      const limit = isShared ? INACTIVITY_LIMIT_SHARED_MS : INACTIVITY_LIMIT_PERSONAL_MS;
+
+      if (lastActivityRaw) {
+        const lastActivity = parseInt(lastActivityRaw, 10);
+        if (!isNaN(lastActivity) && (now - lastActivity > limit)) {
+          this.logout('INACTIVITY');
+          return null;
+        }
+      }
+
       return JSON.parse(raw) as Profesor;
     } catch {
       return null;
@@ -286,7 +442,7 @@ export class AuthService {
    * 3. Cuenta en estado ACTIVO (no en situación de baja o traslado).
    * 4. Contraseña supervisada mediante comprobación criptográfica SHA-256 (rechaza contraseñas incorrectas).
    */
-  static login(emailInput: string, passwordInput: string): { success: boolean; user?: Profesor; error?: string } {
+  static login(emailInput: string, passwordInput: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
     const cleanEmail = emailInput.trim().toLowerCase();
     const cleanPassword = passwordInput.trim();
 
@@ -356,9 +512,9 @@ export class AuthService {
       );
     }
 
-    // 6. Autenticación exitosa y persistencia de sesión
+    // 6. Autenticación exitosa y persistencia de sesión segura
     const authenticatedUser: Profesor = foundProf;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(authenticatedUser));
+    this.persistSession(authenticatedUser, isShared);
     return { success: true, user: authenticatedUser };
   }
 
@@ -370,7 +526,7 @@ export class AuthService {
    * 2. Pertenencia al censo oficial del claustro custodiado en Google Drive
    * 3. Estado ACTIVO en el centro
    */
-  static loginWithGoogleCorporateAccount(emailInput: string): { success: boolean; user?: Profesor; error?: string } {
+  static loginWithGoogleCorporateAccount(emailInput: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
     const cleanEmail = emailInput.trim().toLowerCase();
 
     // 1. Verificación de dominio corporativo oficial @g.educaand.es
@@ -401,7 +557,7 @@ export class AuthService {
 
     // 4. Autenticación exitosa y persistencia de sesión
     const authenticatedUser: Profesor = foundProf;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(authenticatedUser));
+    this.persistSession(authenticatedUser, isShared);
     return { success: true, user: authenticatedUser };
   }
 
@@ -465,7 +621,7 @@ export class AuthService {
    * 3. La cuenta esté dada de alta en el claustro del IES Blas Infante.
    * 4. El docente se encuentre en estado ACTIVO.
    */
-  static loginWithGoogleJwt(jwtToken: string): { success: boolean; user?: Profesor; error?: string } {
+  static loginWithGoogleJwt(jwtToken: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
     const payload = this.decodeGoogleJwt(jwtToken);
     if (!payload || !payload.email) {
       return {
@@ -510,15 +666,49 @@ export class AuthService {
 
     // 4. Inicio de sesión exitoso supervisado por Google
     const authenticatedUser: Profesor = foundProf;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(authenticatedUser));
+    this.persistSession(authenticatedUser, isShared);
     return { success: true, user: authenticatedUser };
   }
 
   /**
-   * Logs out the current user
+   * Cierra la sesión activa del usuario.
+   * Si el cierre fue por inactividad automática (15 min), guarda el motivo para que la
+   * pantalla de inicio de sesión pueda informar al profesor amigablemente.
    */
-  static logout(): void {
-    localStorage.removeItem(SESSION_KEY);
+  static logout(reason: 'MANUAL' | 'INACTIVITY' = 'MANUAL'): void {
+    try {
+      sessionStorage.removeItem(SESSION_KEY);
+      sessionStorage.removeItem(SESSION_TYPE_KEY);
+      sessionStorage.removeItem(LAST_ACTIVITY_KEY);
+
+      localStorage.removeItem(SESSION_KEY);
+      localStorage.removeItem(SESSION_TYPE_KEY);
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+
+      if (reason === 'INACTIVITY') {
+        sessionStorage.setItem(LOGOUT_REASON_KEY, 'INACTIVITY');
+      } else {
+        sessionStorage.removeItem(LOGOUT_REASON_KEY);
+      }
+    } catch {
+      // Ignorar excepciones de storage
+    }
+  }
+
+  /**
+   * Lee y consume el motivo del último cierre de sesión (para mostrar aviso al usuario)
+   */
+  static consumeLogoutReason(): 'INACTIVITY' | null {
+    try {
+      const reason = sessionStorage.getItem(LOGOUT_REASON_KEY);
+      if (reason === 'INACTIVITY') {
+        sessionStorage.removeItem(LOGOUT_REASON_KEY);
+        return 'INACTIVITY';
+      }
+      return null;
+    } catch {
+      return null;
+    }
   }
 
   /**

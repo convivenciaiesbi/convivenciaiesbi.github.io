@@ -567,6 +567,60 @@ export class SecurityTestRunner {
           };
         },
       },
+      {
+        id: 'SEC-13',
+        name: 'Control de Sesión en Equipos Compartidos y Auto-cierre por Inactividad (RGPD / ENS)',
+        category: 'PRIVACY_RGPD',
+        severity: 'ALTA',
+        description: 'Verifica que en equipos de uso compartido la sesión se aísle en memoria de sesión volátil y caduque tras superar el umbral de inactividad establecido por el RGPD.',
+        run: () => {
+          const testUser: Profesor = {
+            id_profesor: 'prof-test-shared-sec',
+            email: 'test.compartido@g.educaand.es',
+            nombre: 'Docente',
+            apellidos: 'Compartido Test',
+            dni: '44556677Z',
+            departamento: 'Orientación',
+            rol: 'ROLE_DOCENTE',
+          };
+
+          // 1. Guardar como equipo compartido
+          AuthService.persistSession(testUser, true);
+          if (!AuthService.isSharedSession()) {
+            return {
+              passed: false,
+              message: 'Fallo: La sesión en equipo compartido no fue clasificada como volátil.',
+            };
+          }
+
+          // 2. Verificar que no persiste en localStorage cuando es compartido
+          const leakedLocal = localStorage.getItem('sigc_bi_auth_user_v2');
+          if (leakedLocal) {
+            return {
+              passed: false,
+              message: 'Vulnerabilidad: La sesión de equipo compartido persistió en localStorage.',
+            };
+          }
+
+          // 3. Simular inactividad vencida
+          sessionStorage.setItem('sigc_bi_last_activity_v1', String(Date.now() - (20 * 60 * 1000))); // Hace 20 min
+          const userAfterInactivity = AuthService.getCurrentUser();
+          if (userAfterInactivity !== null) {
+            return {
+              passed: false,
+              message: 'Fallo: El usuario siguió autenticado tras 20 minutos de inactividad.',
+            };
+          }
+
+          // Limpiar tras el test
+          AuthService.logout();
+
+          return {
+            passed: true,
+            message: 'Aislamiento en sessionStorage, auto-cierre y protección por inactividad en equipos compartidos verificados al 100%.',
+          };
+        },
+      },
     ];
   }
 

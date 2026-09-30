@@ -19,7 +19,12 @@ import {
   ArrowRight,
   KeyRound,
   Check,
-  Info
+  Info,
+  Laptop,
+  Users,
+  Clock,
+  ShieldAlert,
+  X
 } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storageService';
@@ -43,6 +48,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [authStage, setAuthStage] = useState<string | null>(null);
   const [isDriveSyncing, setIsDriveSyncing] = useState(true);
   const [syncVersion, setSyncVersion] = useState(0);
+  const [isSharedDevice, setIsSharedDevice] = useState<boolean>(true);
+  const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
+
+  // Comprobar si hubo un cierre de sesión automático por inactividad
+  useEffect(() => {
+    const reason = AuthService.consumeLogoutReason();
+    if (reason === 'INACTIVITY') {
+      setInactivityNotice(
+        '🔒 Su sesión se ha cerrado automáticamente tras 15 minutos de inactividad para garantizar la protección de datos en este equipo compartido (RGPD/ENS).'
+      );
+    }
+  }, []);
 
   // Al montar la pantalla de login (en cualquier dispositivo nuevo), sincronizar inmediatamente desde Drive
   useEffect(() => {
@@ -113,14 +130,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     setAuthStage(isFirstTimeAccess ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
 
     // 1. Si localmente ya conocemos la contraseña o ya es conocida, comprobar inmediatamente
-    let res = AuthService.login(cleanEmail, password);
+    let res = AuthService.login(cleanEmail, password, isSharedDevice);
 
     // 2. Si no coincide localmente y no es primer acceso, intentar una descarga rápida de Drive por si se actualizó en otro equipo
     if (!res.success && !isFirstTimeAccess) {
       try {
         setAuthStage('Consultando actualización en Google Drive...');
         await GoogleDriveSyncService.pullFromGoogleDrive();
-        res = AuthService.login(cleanEmail, password);
+        res = AuthService.login(cleanEmail, password, isSharedDevice);
       } catch {
         // Fallback local
       }
@@ -183,6 +200,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-sm border border-sky-100 sm:rounded-2xl sm:px-8 space-y-5">
           
+          {/* Inactivity Auto-Logout notice banner */}
+          {inactivityNotice && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2.5 animate-in fade-in duration-100">
+              <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1 leading-snug">
+                {inactivityNotice}
+              </div>
+              <button
+                type="button"
+                onClick={() => setInactivityNotice(null)}
+                className="text-amber-500 hover:text-amber-800 p-0.5 cursor-pointer"
+                title="Cerrar aviso"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Error message */}
           {errorMessage && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 flex items-start gap-2.5 animate-in fade-in duration-100">
@@ -376,8 +411,78 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </div>
             )}
 
+            {/* Selector de Seguridad: Equipo Compartido vs Personal (RGPD) */}
+            <div className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-sky-700" />
+                  <span>Seguridad de Sesión y Dispositivo</span>
+                </label>
+                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-sky-100 text-sky-900 border border-sky-200">
+                  RGPD / ENS
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-1.5">
+                {/* Opción 1: Equipo compartido del centro (Predeterminada por seguridad) */}
+                <label
+                  className={`flex items-start gap-2.5 p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                    isSharedDevice
+                      ? 'bg-sky-50/90 border-sky-300 ring-1 ring-sky-300 shadow-2xs'
+                      : 'bg-white border-slate-200 hover:bg-slate-50 opacity-80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="deviceSecurityMode"
+                    checked={isSharedDevice}
+                    onChange={() => setIsSharedDevice(true)}
+                    className="mt-0.5 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                      <Users className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                      <span>Equipo compartido del centro</span>
+                      <span className="text-[9px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-bold border border-emerald-200">
+                        Recomendado
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Sala de profesores, aulas, ordenadores de guardia. <strong>Cierra sesión tras 15 min de inactividad o al cerrar la ventana</strong>.
+                    </p>
+                  </div>
+                </label>
+
+                {/* Opción 2: Portátil personal */}
+                <label
+                  className={`flex items-start gap-2.5 p-2 rounded-lg border text-left cursor-pointer transition-all ${
+                    !isSharedDevice
+                      ? 'bg-sky-50/90 border-sky-300 ring-1 ring-sky-300 shadow-2xs'
+                      : 'bg-white border-slate-200 hover:bg-slate-50 opacity-80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="deviceSecurityMode"
+                    checked={!isSharedDevice}
+                    onChange={() => setIsSharedDevice(false)}
+                    className="mt-0.5 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                  />
+                  <div className="flex-1 text-xs">
+                    <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                      <Laptop className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                      <span>Mi portátil personal privado</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Mantiene la sesión iniciada en este navegador privado para que no tengas que introducir tu contraseña continuamente.
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </div>
+
             {/* Botón de Envío */}
-            <div className="pt-2">
+            <div className="pt-1">
               <button
                 type="submit"
                 disabled={

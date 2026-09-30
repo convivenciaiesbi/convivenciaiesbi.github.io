@@ -216,8 +216,8 @@ export class GoogleDriveSyncService {
               localHasPendingData = true;
             } else {
               // Si el registro local tiene una fecha de actualización más reciente o estado tramitado
-              const localTime = new Date(localS.fecha_imposicion || 0).getTime();
-              const remoteTime = new Date(existing.fecha_imposicion || 0).getTime();
+              const localTime = new Date(localS.timestamp || localS.fecha || 0).getTime();
+              const remoteTime = new Date(existing.timestamp || existing.fecha || 0).getTime();
               if (localTime >= remoteTime) {
                 sancionMap.set(localS.id_sancion, { ...existing, ...localS });
               }

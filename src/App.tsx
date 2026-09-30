@@ -72,7 +72,8 @@ import {
   ChevronRight, 
   X, 
   ShieldCheck,
-  Info
+  Info,
+  Clock
 } from 'lucide-react';
 
 export default function App() {
@@ -100,6 +101,53 @@ export default function App() {
   const [expulsionBannerDismissed, setExpulsionBannerDismissed] = useState<boolean>(false);
   const [carnetInitialFilterEstado, setCarnetInitialFilterEstado] = useState<string>('TODOS');
   const [carnetFocusedAlumnoId, setCarnetFocusedAlumnoId] = useState<string | null>(null);
+  const [inactivityWarningSeconds, setInactivityWarningSeconds] = useState<number | null>(null);
+
+  // Monitor de Inactividad y Caducidad de Sesión en Equipos Compartidos (RGPD / ENS)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let lastRecordedActivity = Date.now();
+
+    const handleUserActivity = () => {
+      const now = Date.now();
+      // Throttle a 3 segundos para máxima eficiencia sin lag
+      if (now - lastRecordedActivity > 3000) {
+        lastRecordedActivity = now;
+        AuthService.recordActivity();
+        if (inactivityWarningSeconds !== null) {
+          setInactivityWarningSeconds(null);
+        }
+      }
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    activityEvents.forEach((evt) => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    // Verificación periódica del estado de la sesión cada 2 segundos
+    const checkInterval = setInterval(() => {
+      const status = AuthService.getSessionStatus();
+      if (!status.isAuthenticated || status.remainingSeconds <= 0) {
+        handleLogout('INACTIVITY');
+        return;
+      }
+
+      if (status.showWarning) {
+        setInactivityWarningSeconds(status.remainingSeconds);
+      } else {
+        setInactivityWarningSeconds(null);
+      }
+    }, 2000);
+
+    return () => {
+      clearInterval(checkInterval);
+      activityEvents.forEach((evt) => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+    };
+  }, [currentUser, inactivityWarningSeconds]);
 
   // Load from StorageService on initial render
   const refreshAllData = () => {
@@ -169,9 +217,10 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
-    AuthService.logout();
+  const handleLogout = (reason: 'MANUAL' | 'INACTIVITY' = 'MANUAL') => {
+    AuthService.logout(reason);
     setCurrentUser(null);
+    setInactivityWarningSeconds(null);
   };
 
   // Safe navigation handler enforcing role access
@@ -263,7 +312,7 @@ export default function App() {
         currentUser={currentUser}
         onSwitchUser={(user) => {
           setCurrentUser(user);
-          localStorage.setItem('sigc_bi_auth_user_v2', JSON.stringify(user));
+          AuthService.persistSession(user, AuthService.isSharedSession());
         }}
         profesoresDisponibles={profesores.length > 0 ? profesores.filter(p => p.estado !== 'INACTIVO') : PROFESORES_INICIALES}
         pendingSyncCount={0}
@@ -502,6 +551,57 @@ export default function App() {
             refreshAllData();
           }}
         />
+      )}
+
+      {/* Modal de Advertencia de Inactividad Próxima a Expirar (RGPD / Equipos Compartidos) */}
+      {inactivityWarningSeconds !== null && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-amber-300 text-center space-y-4">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-600 shadow-inner">
+              <Clock className="w-8 h-8 animate-pulse" />
+            </div>
+
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                Seguridad de Sesión · RGPD
+              </span>
+              <h3 className="text-lg font-extrabold text-slate-900 mt-2">
+                ¿Sigues ahí? Cierre por inactividad
+              </h3>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                Por seguridad de datos del centro en este equipo compartido, tu sesión se cerrará automáticamente en:
+              </p>
+              
+              <div className="mt-3 py-2 px-5 inline-block bg-amber-50 border border-amber-300 rounded-xl shadow-2xs">
+                <span className="text-3xl font-extrabold font-mono text-amber-700">
+                  {inactivityWarningSeconds}s
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  AuthService.recordActivity();
+                  setInactivityWarningSeconds(null);
+                }}
+                className="w-full sm:flex-1 py-3 px-4 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Continuar conectado</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleLogout('MANUAL')}
+                className="w-full sm:w-auto py-3 px-4 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Footer (Pastel blue aesthetic) */}
