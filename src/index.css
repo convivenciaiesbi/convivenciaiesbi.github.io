@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@media print {
+  @page {
+    margin: 8mm;
+    size: A4 portrait;
+  }
+
+  body {
+    background-color: white !important;
+    color: black !important;
+    overflow: visible !important;
+  }
+
+  /* Hide navigation, buttons and any non-printable UI */
+  .no-print,
+  header,
+  footer,
+  nav,
+  button,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Ensure modal displays as normal document flow on print */
+  .print-modal-overlay {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .print-modal-card {
+    max-width: none !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+    break-after: page;
+  }
+}

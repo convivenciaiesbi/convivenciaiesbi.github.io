@@ -1,0 +1,6 @@
+{
+  "name": "SIGC-BI Convivencia y Puntos - IES Blas Infante",
+  "description": "Sistema Integrado de Gestión de Convivencia y Carnet de 10 Puntos del IES Blas Infante (Córdoba). Sanciones ROF, derivaciones Aula PAC y sincronización con Google Drive corporativo.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
