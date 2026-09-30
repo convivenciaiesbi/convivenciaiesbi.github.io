@@ -174,18 +174,22 @@ export default function App() {
 
     syncFromDrive();
 
-    // 2. Sincronización automática periódica cada 15 segundos entre todos los dispositivos
-    const intervalId = setInterval(syncFromDrive, 15000);
+    // 2. Sincronización automática periódica de alta frecuencia (cada 5 segundos) para inmediatez entre aulas
+    const intervalId = setInterval(syncFromDrive, 5000);
 
-    // 3. Sincronización inmediata cuando la pestaña recupera el foco o el usuario cambia de ventana
-    const handleFocus = () => {
+    // 3. Sincronización inmediata cuando la pestaña recupera el foco, cambia la visibilidad o vuelve la conexión
+    const handleQuickSync = () => {
       syncFromDrive();
     };
-    window.addEventListener('focus', handleFocus);
+    window.addEventListener('focus', handleQuickSync);
+    window.addEventListener('visibilitychange', handleQuickSync);
+    window.addEventListener('online', handleQuickSync);
 
     return () => {
       clearInterval(intervalId);
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', handleQuickSync);
+      window.removeEventListener('visibilitychange', handleQuickSync);
+      window.removeEventListener('online', handleQuickSync);
     };
   }, []);
 

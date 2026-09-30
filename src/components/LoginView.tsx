@@ -61,10 +61,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   }, []);
 
-  // Al montar la pantalla de login (en cualquier dispositivo nuevo), sincronizar inmediatamente desde Drive
+  // Al montar la pantalla de login (en cualquier dispositivo nuevo), sincronizar inmediatamente desde Drive con recarga limpia
   useEffect(() => {
     let isMounted = true;
-    GoogleDriveSyncService.pullFromGoogleDrive().then((res) => {
+    GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true }).then((res) => {
       if (isMounted) {
         setIsDriveSyncing(false);
         if (res.success) {
@@ -112,31 +112,50 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    // Si es primer acceso, comprobar coincidencia y requisitos de complejidad no demasiado estrictos
-    if (isFirstTimeAccess) {
+    // Si localmente parece primer acceso, hacer un pull rápido a Drive por si la contraseña se creó en otro equipo
+    let teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
+    if (!teacherAlreadyHasPassword) {
+      try {
+        setAuthStage('Verificando credenciales en Google Drive...');
+        const driveCheck = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
+        if (driveCheck.success) {
+          teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
+          setSyncVersion((v) => v + 1);
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    // Si efectivamente es primer acceso (tampoco existía en Drive), validar confirmación y complejidad
+    const effectiveFirstTime = !teacherAlreadyHasPassword;
+    if (effectiveFirstTime) {
       if (password !== confirmPassword) {
+        setIsLoading(false);
+        setAuthStage(null);
         setErrorMessage('Las contraseñas no coinciden. Por favor, asegúrese de escribir la misma en ambas casillas.');
         return;
       }
 
       const complexity = AuthService.validatePasswordComplexity(password);
       if (!complexity.valid) {
+        setIsLoading(false);
+        setAuthStage(null);
         setErrorMessage(`Requisitos de contraseña: ${complexity.error}`);
         return;
       }
     }
 
-    setIsLoading(true);
-    setAuthStage(isFirstTimeAccess ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
+    setAuthStage(effectiveFirstTime ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
 
-    // 1. Si localmente ya conocemos la contraseña o ya es conocida, comprobar inmediatamente
+    // 1. Iniciar sesión
     let res = AuthService.login(cleanEmail, password, isSharedDevice);
 
-    // 2. Si no coincide localmente y no es primer acceso, intentar una descarga rápida de Drive por si se actualizó en otro equipo
-    if (!res.success && !isFirstTimeAccess) {
+    // 2. Si no coincide y no era primer acceso, intentar una descarga forzada de Drive
+    if (!res.success && !effectiveFirstTime) {
       try {
         setAuthStage('Consultando actualización en Google Drive...');
-        await GoogleDriveSyncService.pullFromGoogleDrive();
+        await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
         res = AuthService.login(cleanEmail, password, isSharedDevice);
       } catch {
         // Fallback local

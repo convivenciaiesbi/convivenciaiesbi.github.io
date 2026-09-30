@@ -119,7 +119,7 @@ export class GoogleDriveSyncService {
    * Utiliza fusión bidireccional no destructiva (CRDT) para que múltiples profesores
    * puedan ingresar partes simultáneamente sin pisarse ni perder registros.
    */
-  static async pullFromGoogleDrive(): Promise<{ success: boolean; message: string; notModified?: boolean; dataCount?: { profesores: number; alumnos: number; sanciones: number } }> {
+  static async pullFromGoogleDrive(options?: { forceRefresh?: boolean }): Promise<{ success: boolean; message: string; notModified?: boolean; dataCount?: { profesores: number; alumnos: number; sanciones: number } }> {
     const apiUrl = this.getSyncApiUrl();
     if (!apiUrl) {
       const profesores = StorageService.getProfesores();
@@ -136,10 +136,10 @@ export class GoogleDriveSyncService {
     try {
       const controller = new AbortController();
       // Timeout ágil para no bloquear la interfaz en redes lentas
-      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-      const lastSync = this.getLastSyncTimestamp() || '';
-      const url = `${apiUrl}?action=read_database${lastSync ? `&since=${encodeURIComponent(lastSync)}` : ''}`;
+      const lastSync = options?.forceRefresh ? '' : (this.getLastSyncTimestamp() || '');
+      const url = `${apiUrl}?action=read_database${lastSync ? `&since=${encodeURIComponent(lastSync)}` : ''}&t=${Date.now()}`;
 
       const response = await fetch(url, {
         method: 'GET',
@@ -154,8 +154,8 @@ export class GoogleDriveSyncService {
 
       const remoteData: any = await response.json();
 
-      // Si el servidor indica que los datos no han cambiado desde nuestra última sincronización
-      if (remoteData && remoteData.not_modified === true) {
+      // Si el servidor indica que los datos no han cambiado desde nuestra última sincronización (solo si no forzamos)
+      if (!options?.forceRefresh && remoteData && remoteData.not_modified === true) {
         return {
           success: true,
           notModified: true,

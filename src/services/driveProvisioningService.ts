@@ -419,6 +419,16 @@ function guardarBaseDatosEnDrive(incomingData) {
             }
           });
         }
+
+        // Fusionar credenciales de contraseñas de docentes (para que nunca se pierdan entre equipos)
+        if (currentData.credenciales_profesores && typeof currentData.credenciales_profesores === 'object') {
+          if (!finalData.credenciales_profesores) finalData.credenciales_profesores = {};
+          for (var emailKey in currentData.credenciales_profesores) {
+            if (!finalData.credenciales_profesores[emailKey]) {
+              finalData.credenciales_profesores[emailKey] = currentData.credenciales_profesores[emailKey];
+            }
+          }
+        }
       }
     } catch(err) {
       Logger.log('Advertencia en fusión remota: ' + err);

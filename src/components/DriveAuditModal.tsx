@@ -559,20 +559,52 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
             <button
               type="button"
               onClick={() => {
-                const payload = GoogleDriveSyncService.getFullDatabasePayload();
-                const jsonStr = JSON.stringify(payload, null, 2);
-                const blob = new Blob([jsonStr], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `00_SIGC_BD_CENTRO_BLAS_INFANTE_${new Date().toISOString().split('T')[0]}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                setSyncFeedback('Archivo de base de datos descargado con éxito para custodia en Google Drive.');
+                try {
+                  const payload = GoogleDriveSyncService.getFullDatabasePayload();
+                  const jsonStr = JSON.stringify(payload, null, 2);
+                  const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_${new Date().toISOString().split('T')[0]}.json`;
+
+                  // Método 1: Blob y enlace a
+                  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+                  
+                  // Soporte navegador estándar
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.style.display = 'none';
+                  a.href = url;
+                  a.setAttribute('download', filename);
+                  document.body.appendChild(a);
+                  a.click();
+                  
+                  setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }, 2000);
+
+                  // Guardar copia local en el registro de snapshots
+                  StorageService.crearSnapshotBackup(currentUserEmail);
+
+                  setSyncFeedback(`✅ ¡Copia de seguridad descargada exitosamente como "${filename}"! (${payload.alumnos.length} alumnos, ${payload.sanciones.length} partes).`);
+                } catch (err: any) {
+                  // Fallback con Data URI si Blob está restringido por políticas de sandbox
+                  try {
+                    const payload = GoogleDriveSyncService.getFullDatabasePayload();
+                    const jsonStr = JSON.stringify(payload, null, 2);
+                    const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_${new Date().toISOString().split('T')[0]}.json`;
+                    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonStr);
+                    const link = document.createElement('a');
+                    link.setAttribute('href', dataUri);
+                    link.setAttribute('download', filename);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setSyncFeedback(`✅ ¡Copia de seguridad descargada con éxito!`);
+                  } catch (fallbackErr: any) {
+                    setSyncFeedback(`❌ Error al descargar el archivo: ${err?.message || fallbackErr?.message}`);
+                  }
+                }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs cursor-pointer active:scale-98 transition-all"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Descargar Base de Datos Completa (.json)</span>
