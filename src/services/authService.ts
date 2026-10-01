@@ -295,7 +295,20 @@ export class AuthService {
   static hasTeacherRegisteredPassword(email: string): boolean {
     const cleanEmail = email.toLowerCase().trim();
     const store = this.getCredentialsStore();
-    return Boolean(store[cleanEmail]);
+    if (store[cleanEmail]) return true;
+
+    // Comprobación redundante en la ficha del docente (custodiada en Google Drive)
+    const teachersList = StorageService.getProfesores();
+    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
+    if (prof && prof.password_hash) {
+      store[cleanEmail] = prof.password_hash;
+      try {
+        localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+      } catch {}
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -304,14 +317,58 @@ export class AuthService {
   static getTeacherHash(email: string): string | null {
     const cleanEmail = email.toLowerCase().trim();
     const store = this.getCredentialsStore();
-    return store[cleanEmail] || null;
+    if (store[cleanEmail]) return store[cleanEmail];
+
+    // Comprobación redundante en la ficha del docente
+    const teachersList = StorageService.getProfesores();
+    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
+    if (prof && prof.password_hash) {
+      store[cleanEmail] = prof.password_hash;
+      try {
+        localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+      } catch {}
+      return prof.password_hash;
+    }
+
+    return null;
   }
 
   /**
    * Obtiene la totalidad de hashes de credenciales de docentes para sincronización centralizada en Google Drive.
    */
   static getAllCredentials(): Record<string, string> {
-    return this.getCredentialsStore();
+    const store = this.getCredentialsStore();
+    // Consolidar también con los hashes presentes en las fichas de profesores
+    const teachersList = StorageService.getProfesores();
+    teachersList.forEach((p) => {
+      const k = p.email.toLowerCase().trim();
+      if (p.password_hash && !store[k]) {
+        store[k] = p.password_hash;
+      }
+    });
+    return store;
+  }
+
+  /**
+   * Guarda o actualiza directamente un hash de credencial recibido desde Google Drive.
+   */
+  static setTeacherHashDirect(email: string, hash: string): void {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail || !hash) return;
+    try {
+      const store = this.getCredentialsStore();
+      store[cleanEmail] = hash;
+      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+
+      const profs = StorageService.getProfesores();
+      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
+      if (idx !== -1 && profs[idx].password_hash !== hash) {
+        profs[idx].password_hash = hash;
+        StorageService.saveProfesores(profs);
+      }
+    } catch (e) {
+      console.error('Error guardando hash directo:', e);
+    }
   }
 
   /**
@@ -322,15 +379,27 @@ export class AuthService {
     try {
       const localStore = this.getCredentialsStore();
       let changed = false;
+      const profs = StorageService.getProfesores();
+      let profsChanged = false;
+
       for (const [email, hash] of Object.entries(remoteStore)) {
         const cleanEmail = email.toLowerCase().trim();
         if (cleanEmail && hash && (!localStore[cleanEmail] || localStore[cleanEmail] !== hash)) {
           localStore[cleanEmail] = hash;
           changed = true;
+
+          const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
+          if (idx !== -1 && profs[idx].password_hash !== hash) {
+            profs[idx].password_hash = hash;
+            profsChanged = true;
+          }
         }
       }
       if (changed) {
         localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(localStore));
+      }
+      if (profsChanged) {
+        StorageService.saveProfesores(profs);
       }
     } catch (e) {
       console.error('Error fusionando credenciales remotas:', e);
@@ -344,8 +413,17 @@ export class AuthService {
     try {
       const cleanEmail = email.toLowerCase().trim();
       const store = this.getCredentialsStore();
-      store[cleanEmail] = sha256Hex(plainPassword.trim());
+      const hash = sha256Hex(plainPassword.trim());
+      store[cleanEmail] = hash;
       localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+
+      // Guardar también en la ficha del profesor para que viaje con el censo en Drive
+      const profs = StorageService.getProfesores();
+      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
+      if (idx !== -1) {
+        profs[idx].password_hash = hash;
+        StorageService.saveProfesores(profs);
+      }
       return true;
     } catch {
       return false;
@@ -363,6 +441,13 @@ export class AuthService {
       const store = this.getCredentialsStore();
       delete store[cleanEmail];
       localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+
+      const profs = StorageService.getProfesores();
+      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
+      if (idx !== -1 && profs[idx].password_hash) {
+        delete profs[idx].password_hash;
+        StorageService.saveProfesores(profs);
+      }
       
       StorageService.addAuditLog(
         adminEmail,

@@ -47,6 +47,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [authStage, setAuthStage] = useState<string | null>(null);
   const [isDriveSyncing, setIsDriveSyncing] = useState(true);
+  const [isCheckingUserCredentials, setIsCheckingUserCredentials] = useState(false);
   const [syncVersion, setSyncVersion] = useState(0);
   const [isSharedDevice, setIsSharedDevice] = useState<boolean>(true);
   const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
@@ -84,7 +85,38 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   // Re-evaluar de forma reactiva con syncVersion para reflejar los datos recién descargados de Drive
   const registeredTeacher = isEducaand ? AuthService.isRegisteredInClaustro(cleanEmail) : null;
   const hasRegisteredPassword = isEducaand ? AuthService.hasTeacherRegisteredPassword(cleanEmail) : false;
-  const isFirstTimeAccess = Boolean(isEducaand && registeredTeacher && !hasRegisteredPassword);
+
+  // Si el docente escribe su correo y aún no se detecta contraseña localmente, verificar Drive en segundo plano de inmediato
+  useEffect(() => {
+    if (cleanEmail && isEducaand && registeredTeacher && !hasRegisteredPassword && !isDriveSyncing) {
+      let isMounted = true;
+      setIsCheckingUserCredentials(true);
+      GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
+        .then((res) => {
+          if (isMounted) {
+            setIsCheckingUserCredentials(false);
+            if (res.success) {
+              setSyncVersion((v) => v + 1);
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) setIsCheckingUserCredentials(false);
+        });
+      return () => {
+        isMounted = false;
+      };
+    }
+  }, [cleanEmail, isEducaand, registeredTeacher?.id_profesor, hasRegisteredPassword, isDriveSyncing]);
+
+  // Solo se considera "Primer Acceso" si se ha sincronizado con Drive y con certeza NO existe contraseña previa
+  const isFirstTimeAccess = Boolean(
+    isEducaand && 
+    registeredTeacher && 
+    !hasRegisteredPassword && 
+    !isDriveSyncing && 
+    !isCheckingUserCredentials
+  );
   const unidad = StorageService.getUnidadInstitucional();
 
   // Password / Credentials based submission (Única vía de acceso centralizado)
@@ -336,6 +368,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 </div>
               )}
             </div>
+
+            {/* Indicador de verificación de credenciales con Google Drive */}
+            {(isDriveSyncing || isCheckingUserCredentials) && isEducaand && registeredTeacher && (
+              <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-800 flex items-center gap-2 animate-in fade-in duration-100">
+                <Loader2 className="w-3.5 h-3.5 text-sky-600 animate-spin shrink-0" />
+                <span className="font-medium">Sincronizando credenciales seguras con Google Drive...</span>
+              </div>
+            )}
 
             {/* Aviso informativo de PRIMER ACCESO */}
             {isFirstTimeAccess && (

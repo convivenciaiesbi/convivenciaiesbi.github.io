@@ -98,6 +98,17 @@ export class GoogleDriveSyncService {
    */
   static getFullDatabasePayload(): DriveDatabaseState {
     const unidad = StorageService.getUnidadInstitucional();
+    const creds = AuthService.getAllCredentials();
+    const profs = StorageService.getProfesores().map(p => {
+      const cleanMail = p.email.toLowerCase().trim();
+      const hash = p.password_hash || creds[cleanMail];
+      if (hash) {
+        creds[cleanMail] = hash;
+        return { ...p, password_hash: hash };
+      }
+      return p;
+    });
+
     return {
       version: '3.0.0-PROD',
       timestamp: new Date().toISOString(),
@@ -108,8 +119,8 @@ export class GoogleDriveSyncService {
         cuenta_institucional: unidad.email,
         drive_folder_id: unidad.folderId || '1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP',
       },
-      profesores: StorageService.getProfesores(),
-      credenciales_profesores: AuthService.getAllCredentials(),
+      profesores: profs,
+      credenciales_profesores: creds,
       alumnos: StorageService.getAlumnos(),
       sanciones: StorageService.getSanciones(),
       compensaciones: StorageService.getCompensaciones(),
@@ -158,7 +169,30 @@ export class GoogleDriveSyncService {
         throw new Error(`Error en el servidor de Google Drive (Código HTTP ${response.status})`);
       }
 
-      const remoteData: any = await response.json();
+      // 1. Obtener texto crudo y parsear de forma resiliente (maneja JSON directo, data=... y codificación URL)
+      const rawText = await response.text();
+      let remoteData: any = null;
+
+      try {
+        remoteData = JSON.parse(rawText);
+      } catch {
+        const trimmed = (rawText || '').trim();
+        if (trimmed.startsWith('data=')) {
+          try {
+            const decoded = decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' '));
+            remoteData = JSON.parse(decoded);
+          } catch {}
+        } else if (trimmed.startsWith('%7B') || trimmed.startsWith('%7b')) {
+          try {
+            const decoded = decodeURIComponent(trimmed.replace(/\+/g, ' '));
+            remoteData = JSON.parse(decoded);
+          } catch {}
+        }
+      }
+
+      if (!remoteData || typeof remoteData !== 'object') {
+        throw new Error('Respuesta inválida del servidor de Google Drive: formato no reconocido.');
+      }
 
       // Si el servidor indica que los datos no han cambiado desde nuestra última sincronización (solo si no forzamos)
       if (!options?.forceRefresh && remoteData && remoteData.not_modified === true) {
@@ -203,21 +237,31 @@ export class GoogleDriveSyncService {
         remoteData.profesores.forEach((p: Profesor) => {
           if (p?.email && !allDeletedProfs.has(p.id_profesor) && !allDeletedProfs.has(p.email)) {
             profMap.set(p.email.toLowerCase().trim(), p);
+            // Si el docente viene con su contraseña criptográfica desde Drive, sincronizarla al instante
+            if (p.password_hash) {
+              AuthService.setTeacherHashDirect(p.email, p.password_hash);
+            }
           }
         });
         localProfs.forEach(lp => {
           if (lp?.email && !allDeletedProfs.has(lp.id_profesor) && !allDeletedProfs.has(lp.email)) {
             const k = lp.email.toLowerCase().trim();
-            if (!profMap.has(k)) {
+            const existing = profMap.get(k);
+            if (!existing) {
               profMap.set(k, lp);
               localHasPendingData = true;
+            } else {
+              if (lp.password_hash && !existing.password_hash) {
+                existing.password_hash = lp.password_hash;
+                localHasPendingData = true;
+              }
             }
           }
         });
         StorageService.saveProfesores(Array.from(profMap.values()));
       }
 
-      // 2. Fusión de Credenciales
+      // 2. Fusión de Credenciales Centralizadas
       if (remoteData.credenciales_profesores && typeof remoteData.credenciales_profesores === 'object') {
         AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores);
       }
@@ -389,30 +433,29 @@ export class GoogleDriveSyncService {
     this.isPushing = true;
     const jsonString = JSON.stringify(payload);
 
+    // 1. Envío estándar con text/plain (CORS-safelisted, sin preflight OPTIONS y sin envoltorio data=)
     try {
-      // 1. Envío ultrarrápido con text/plain
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-      const response = await fetch(apiUrl, {
+      await fetch(apiUrl, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: jsonString,
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
 
-      if (response.ok) {
-        localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
-        StorageService.clearPendingSyncSancionIds();
-        this.finishPush();
-        return {
-          success: true,
-          message: 'Datos y censos custodiados exitosamente en Google Drive.',
-        };
-      }
+      localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
+      StorageService.clearPendingSyncSancionIds();
+      this.finishPush();
+      return {
+        success: true,
+        message: 'Datos y censos custodiados exitosamente en Google Drive.',
+      };
     } catch {
-      // Fallback si la conexión se interrumpió o fue bloqueada por CORS
+      // Fallback a urlencoded si text/plain falla en algún navegador antiguo
     }
 
     // 2. Envío de respaldo multipart/form-data

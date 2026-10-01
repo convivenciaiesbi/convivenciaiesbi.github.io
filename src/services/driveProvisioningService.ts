@@ -326,15 +326,31 @@ function doPost(e) {
 
   try {
     var raw = '';
-    if (e && e.postData && e.postData.contents) {
-      raw = e.postData.contents;
-    } else if (e && e.parameter && e.parameter.data) {
+    if (e && e.parameter && e.parameter.data) {
       raw = e.parameter.data;
+    } else if (e && e.postData && e.postData.contents) {
+      raw = e.postData.contents;
     }
     if (!raw) {
       throw new Error('No se recibieron datos en la petición POST');
     }
-    var postData = JSON.parse(raw);
+
+    var postData;
+    try {
+      postData = JSON.parse(raw);
+    } catch (parseErr) {
+      var trimmed = (raw || '').trim();
+      if (trimmed.indexOf('data=') === 0) {
+        var decoded = decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' '));
+        postData = JSON.parse(decoded);
+      } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
+        var decoded = decodeURIComponent(trimmed.replace(/\+/g, ' '));
+        postData = JSON.parse(decoded);
+      } else {
+        throw parseErr;
+      }
+    }
+
     guardarBaseDatosEnDrive(postData);
 
     return ContentService.createTextOutput(JSON.stringify({
@@ -358,7 +374,19 @@ function leerBaseDatosDesdeDrive() {
   if (files.hasNext()) {
     var file = files.next();
     var content = file.getBlob().getDataAsString();
-    var parsed = JSON.parse(content);
+    var parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      var trimmed = (content || '').trim();
+      if (trimmed.indexOf('data=') === 0) {
+        parsed = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' ')));
+      } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
+        parsed = JSON.parse(decodeURIComponent(trimmed.replace(/\+/g, ' ')));
+      } else {
+        throw e;
+      }
+    }
     
     // Almacenar en RAM Cache para que las siguientes lecturas tomen < 40ms
     try {
