@@ -18,6 +18,8 @@ export interface Profesor {
   motivo_baja?: string;
   fecha_baja?: string;
   password_hash?: string; // Hash SHA-256 de contraseña custodiado en Drive
+  requiere_cambio_clave?: boolean; // Marca si Jefatura solicita cambio obligatorio de contraseña
+  fecha_modificacion_clave?: string; // Marca de tiempo ISO de la última modificación de clave
 }
 
 export type GrupoCiclo = 

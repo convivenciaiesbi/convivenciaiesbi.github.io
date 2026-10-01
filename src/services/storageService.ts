@@ -798,6 +798,8 @@ export class StorageService {
       id_profesor: `prof-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       email: emailClean,
       estado: 'ACTIVO',
+      requiere_cambio_clave: true,
+      fecha_modificacion_clave: new Date().toISOString(),
     };
 
     profesores.push(nuevoProfesor);

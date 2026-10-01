@@ -7,7 +7,7 @@ import { jsPDF } from 'jspdf';
 import { Sancion, Alumno } from '../types/convivencia';
 import { MATRIZ_ROF_CATALOG, obtenerTipificacionNormativa } from '../data/rofCatalog';
 
-import iesCrestUrl from '../assets/images/ies_blas_infante_crest_1790178434654.jpg';
+import iesCrestUrl from '../assets/images/logo_rectangular_iesbi.png';
 import juntaLogoUrl from '../assets/images/junta_andalucia_logo.jpg';
 
 // Helper to convert an image URL or import to base64 DataURL

@@ -442,6 +442,11 @@ function guardarBaseDatosEnDrive(incomingData) {
         (currentData.deleted_profesores || []).forEach(function(id) { deletedProfMap[id] = true; });
         finalData.deleted_profesores = Object.keys(deletedProfMap);
 
+        var resetCredMap = {};
+        (finalData.reset_credenciales_emails || []).forEach(function(em) { if (em) resetCredMap[em.toLowerCase().trim()] = true; });
+        (currentData.reset_credenciales_emails || []).forEach(function(em) { if (em) resetCredMap[em.toLowerCase().trim()] = true; });
+        finalData.reset_credenciales_emails = Object.keys(resetCredMap);
+
         // 1. Filtrar y fusionar sanciones descartando cualquier ID eliminada oficialmente
         finalData.sanciones = (finalData.sanciones || []).filter(function(s) {
           return s && s.id_sancion && !deletedSancionMap[s.id_sancion];
@@ -468,10 +473,44 @@ function guardarBaseDatosEnDrive(incomingData) {
           });
         }
 
-        // 3. Fusionar credenciales de contraseñas de docentes (para que nunca se pierdan entre equipos)
+        // 3. Fusionar claustro docente (para no perder altas ni modificaciones entre ordenadores)
+        if (currentData.profesores && Array.isArray(currentData.profesores)) {
+          var incomingProfIds = {};
+          var incomingProfEmails = {};
+          (finalData.profesores || []).forEach(function(p) {
+            if (p && p.id_profesor) incomingProfIds[p.id_profesor] = true;
+            if (p && p.email) incomingProfEmails[p.email.toLowerCase().trim()] = true;
+          });
+          currentData.profesores.forEach(function(existingP) {
+            if (existingP && existingP.id_profesor && !deletedProfMap[existingP.id_profesor]) {
+              var em = (existingP.email || '').toLowerCase().trim();
+              if (!deletedProfMap[em] && !incomingProfIds[existingP.id_profesor] && !incomingProfEmails[em]) {
+                finalData.profesores.push(existingP);
+              }
+            }
+          });
+        }
+
+        // 4. Fusionar censo de alumnado
+        if (currentData.alumnos && Array.isArray(currentData.alumnos)) {
+          var incomingAlmIds = {};
+          (finalData.alumnos || []).forEach(function(a) { if (a && a.id_alumno) incomingAlmIds[a.id_alumno] = true; });
+          currentData.alumnos.forEach(function(existingA) {
+            if (existingA && existingA.id_alumno && !deletedAlumnoMap[existingA.id_alumno] && !incomingAlmIds[existingA.id_alumno]) {
+              finalData.alumnos.push(existingA);
+            }
+          });
+        }
+
+        // 5. Fusionar credenciales de contraseñas de docentes (NUNCA resucitar claves revocadas/reseteadas)
         if (currentData.credenciales_profesores && typeof currentData.credenciales_profesores === 'object') {
           if (!finalData.credenciales_profesores) finalData.credenciales_profesores = {};
           for (var emailKey in currentData.credenciales_profesores) {
+            var cleanKey = emailKey.toLowerCase().trim();
+            if (resetCredMap[cleanKey]) {
+              delete finalData.credenciales_profesores[emailKey];
+              continue;
+            }
             if (!finalData.credenciales_profesores[emailKey]) {
               finalData.credenciales_profesores[emailKey] = currentData.credenciales_profesores[emailKey];
             }

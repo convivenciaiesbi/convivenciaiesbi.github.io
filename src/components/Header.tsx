@@ -32,7 +32,7 @@ import {
 import { Profesor } from '../types/convivencia';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storageService';
-import iesLogo from '../assets/images/logo_rectangular.png';
+import iesLogo from '../assets/images/logo_rectangular_iesbi.png';
 
 interface HeaderProps {
   currentView: string;

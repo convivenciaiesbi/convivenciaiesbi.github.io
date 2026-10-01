@@ -24,13 +24,14 @@ import {
   Users,
   Clock,
   ShieldAlert,
+  RefreshCw,
   X
 } from 'lucide-react';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storageService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
 import { Profesor } from '../types/convivencia';
-import iesLogo from '../assets/images/ies_blas_infante_crest_1790178434654.jpg';
+import iesLogo from '../assets/images/logo_rectangular_iesbi.png';
 import juntaLogo from '../assets/images/junta_andalucia_logo.jpg';
 
 interface LoginViewProps {
@@ -84,36 +85,44 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const isEducaand = cleanEmail.endsWith('@g.educaand.es');
   // Re-evaluar de forma reactiva con syncVersion para reflejar los datos recién descargados de Drive
   const registeredTeacher = isEducaand ? AuthService.isRegisteredInClaustro(cleanEmail) : null;
+  const requiresPasswordChange = isEducaand ? AuthService.requiresPasswordChange(cleanEmail) : false;
   const hasRegisteredPassword = isEducaand ? AuthService.hasTeacherRegisteredPassword(cleanEmail) : false;
 
-  // Si el docente escribe su correo y aún no se detecta contraseña localmente, verificar Drive en segundo plano de inmediato
+  // Si el docente escribe su correo y no figura en claustro, o no tiene clave, o requiere cambio:
+  // verificar Drive en segundo plano de inmediato para tener el estado actualizado al instante
   useEffect(() => {
-    if (cleanEmail && isEducaand && registeredTeacher && !hasRegisteredPassword && !isDriveSyncing) {
-      let isMounted = true;
-      setIsCheckingUserCredentials(true);
-      GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
-        .then((res) => {
-          if (isMounted) {
-            setIsCheckingUserCredentials(false);
-            if (res.success) {
-              setSyncVersion((v) => v + 1);
-            }
-          }
-        })
-        .catch(() => {
-          if (isMounted) setIsCheckingUserCredentials(false);
-        });
-      return () => {
-        isMounted = false;
-      };
-    }
-  }, [cleanEmail, isEducaand, registeredTeacher?.id_profesor, hasRegisteredPassword, isDriveSyncing]);
+    if (cleanEmail && isEducaand && !isDriveSyncing) {
+      const localTeacher = AuthService.isRegisteredInClaustro(cleanEmail);
+      const localHasPass = AuthService.hasTeacherRegisteredPassword(cleanEmail);
+      const localReqChange = AuthService.requiresPasswordChange(cleanEmail);
 
-  // Solo se considera "Primer Acceso" si se ha sincronizado con Drive y con certeza NO existe contraseña previa
+      if (!localTeacher || !localHasPass || localReqChange) {
+        let isMounted = true;
+        setIsCheckingUserCredentials(true);
+        GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
+          .then((res) => {
+            if (isMounted) {
+              setIsCheckingUserCredentials(false);
+              if (res.success) {
+                setSyncVersion((v) => v + 1);
+              }
+            }
+          })
+          .catch(() => {
+            if (isMounted) setIsCheckingUserCredentials(false);
+          });
+        return () => {
+          isMounted = false;
+        };
+      }
+    }
+  }, [cleanEmail, isEducaand, isDriveSyncing]);
+
+  // Se requiere definir o cambiar contraseña si no tiene contraseña previa O si Jefatura exige cambio
   const isFirstTimeAccess = Boolean(
     isEducaand && 
     registeredTeacher && 
-    !hasRegisteredPassword && 
+    (!hasRegisteredPassword || requiresPasswordChange) && 
     !isDriveSyncing && 
     !isCheckingUserCredentials
   );
@@ -129,28 +138,55 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    if (!registeredTeacher) {
+    // 1. Si no figura en el claustro local, hacer SIEMPRE una consulta forzada a Google Drive
+    // por si fue dado de alta hace poco en otro equipo
+    let teacher = registeredTeacher;
+    if (!teacher) {
+      try {
+        setIsLoading(true);
+        setAuthStage('Verificando alta en Google Drive...');
+        const driveRes = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
+        if (driveRes.success) {
+          teacher = AuthService.isRegisteredInClaustro(cleanEmail);
+          setSyncVersion((v) => v + 1);
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    if (!teacher) {
+      setIsLoading(false);
+      setAuthStage(null);
       setErrorMessage(`Acceso denegado: La cuenta "${cleanEmail}" no figura en el claustro docente del IES Blas Infante. Debe ser dada de alta previamente por Jefatura de Estudios.`);
       return;
     }
 
-    if (registeredTeacher.estado === 'INACTIVO') {
-      setErrorMessage(`Acceso bloqueado: La cuenta docente "${cleanEmail}" está actualmente dada de BAJA en el centro (${registeredTeacher.motivo_baja || 'Fin de destino escolar'}).`);
+    if (teacher.estado === 'INACTIVO') {
+      setIsLoading(false);
+      setAuthStage(null);
+      setErrorMessage(`Acceso bloqueado: La cuenta docente "${cleanEmail}" está actualmente dada de BAJA en el centro (${teacher.motivo_baja || 'Fin de destino escolar'}).`);
       return;
     }
 
     if (!password.trim()) {
+      setIsLoading(false);
+      setAuthStage(null);
       setErrorMessage('Por favor, introduzca su contraseña.');
       return;
     }
 
-    // Si localmente parece primer acceso, hacer un pull rápido a Drive por si la contraseña se creó en otro equipo
+    // Comprobar si requiere definir o cambiar contraseña
+    let teacherRequiresChange = AuthService.requiresPasswordChange(cleanEmail);
     let teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
-    if (!teacherAlreadyHasPassword) {
+
+    // Si parece que necesita cambio o que no tiene contraseña, sincronizar con Drive para confirmar
+    if (!teacherAlreadyHasPassword || teacherRequiresChange) {
       try {
         setAuthStage('Verificando credenciales en Google Drive...');
         const driveCheck = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
         if (driveCheck.success) {
+          teacherRequiresChange = AuthService.requiresPasswordChange(cleanEmail);
           teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
           setSyncVersion((v) => v + 1);
         }
@@ -159,9 +195,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       }
     }
 
-    // Si efectivamente es primer acceso (tampoco existía en Drive), validar confirmación y complejidad
-    const effectiveFirstTime = !teacherAlreadyHasPassword;
-    if (effectiveFirstTime) {
+    const effectiveSetupRequired = !teacherAlreadyHasPassword || teacherRequiresChange;
+
+    if (effectiveSetupRequired) {
       if (password !== confirmPassword) {
         setIsLoading(false);
         setAuthStage(null);
@@ -178,15 +214,16 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       }
     }
 
-    setAuthStage(effectiveFirstTime ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
+    setAuthStage(effectiveSetupRequired ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
 
-    // 1. Iniciar sesión
+    // Iniciar sesión
     let res = AuthService.login(cleanEmail, password, isSharedDevice);
 
-    // 2. Si no coincide y no era primer acceso, intentar una descarga forzada de Drive
-    if (!res.success && !effectiveFirstTime) {
+    // Si no coincide y no requería configuración, intentar una descarga forzada de Drive
+    // por si Jefatura le asignó una nueva clave manual desde otro ordenador
+    if (!res.success && !effectiveSetupRequired) {
       try {
-        setAuthStage('Consultando actualización en Google Drive...');
+        setAuthStage('Consultando actualización de credencial en Google Drive...');
         await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
         res = AuthService.login(cleanEmail, password, isSharedDevice);
       } catch {
@@ -195,7 +232,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
 
     if (res.success && res.user) {
-      // Si fue primer acceso, o para mantener sincronizado, enviar a Drive en segundo plano sin congelar la pantalla
+      // Sincronizar en segundo plano con Drive
       GoogleDriveSyncService.pushToGoogleDrive().catch((e) => {
         console.warn('Sincronización en segundo plano con Drive:', e);
       });
@@ -377,15 +414,29 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               </div>
             )}
 
-            {/* Aviso informativo de PRIMER ACCESO */}
+            {/* Aviso informativo de PRIMER ACCESO o CAMBIO DE CONTRASEÑA */}
             {isFirstTimeAccess && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1.5 animate-in fade-in duration-150">
-                <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                  <KeyRound className="w-4 h-4 text-amber-600" />
-                  <span>Primer Acceso: Establece tu contraseña</span>
+              <div className={`p-3 rounded-xl text-xs space-y-1.5 animate-in fade-in duration-150 border ${
+                requiresPasswordChange 
+                  ? 'bg-amber-50/90 border-amber-300 text-amber-950' 
+                  : 'bg-sky-50 border-sky-200 text-sky-950'
+              }`}>
+                <div className="flex items-center gap-1.5 font-bold">
+                  {requiresPasswordChange ? (
+                    <RefreshCw className="w-4 h-4 text-amber-700 animate-spin-reverse" />
+                  ) : (
+                    <KeyRound className="w-4 h-4 text-sky-600" />
+                  )}
+                  <span>
+                    {requiresPasswordChange 
+                      ? 'Actualización de Seguridad: Define tu nueva contraseña' 
+                      : 'Primer Acceso: Establece tu contraseña corporativa'}
+                  </span>
                 </div>
-                <p className="text-[11px] text-amber-800 leading-relaxed">
-                  Esta es tu primera vez accediendo al sistema. Introduce una contraseña que contenga <strong>al menos 6 caracteres combinando letras y números</strong> (ejemplo: <code>infante26</code>, <code>blas2026</code>). Se guardará de forma centralizada para que puedas usarla en cualquier equipo.
+                <p className="text-[11px] leading-relaxed text-slate-700">
+                  {requiresPasswordChange 
+                    ? 'Jefatura de Estudios ha solicitado que establezcas una nueva contraseña para continuar. Introduce una clave de al menos 6 caracteres combinando letras y números (ej: infante26).' 
+                    : 'Esta es tu primera vez accediendo al sistema. Introduce una contraseña que contenga al menos 6 caracteres combinando letras y números (ejemplo: infante26, blas2026). Se guardará de forma centralizada para que puedas usarla en cualquier equipo.'}
                 </p>
               </div>
             )}
@@ -394,7 +445,9 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="block text-xs font-bold text-slate-700">
-                  {isFirstTimeAccess ? 'Nueva Contraseña' : 'Contraseña de Acceso'}
+                  {isFirstTimeAccess 
+                    ? (requiresPasswordChange ? 'Nueva Contraseña Requerida' : 'Nueva Contraseña') 
+                    : 'Contraseña de Acceso'}
                 </label>
                 {isFirstTimeAccess && (
                   <span className="text-[10px] text-amber-800 bg-amber-100 font-semibold px-1.5 py-0.5 rounded border border-amber-200">
@@ -547,7 +600,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 disabled={
                   isLoading || 
                   !isEducaand || 
-                  !registeredTeacher || 
                   password.trim().length === 0 ||
                   (isFirstTimeAccess && (password.length < 6 || password !== confirmPassword))
                 }
@@ -561,7 +613,11 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                 ) : (
                   <>
                     <UserCheck className="w-4 h-4" />
-                    <span>{isFirstTimeAccess ? 'Guardar Contraseña y Acceder' : 'Acceder al Sistema'}</span>
+                    <span>
+                      {isFirstTimeAccess 
+                        ? (requiresPasswordChange ? 'Guardar Nueva Contraseña y Acceder' : 'Crear Contraseña y Acceder') 
+                        : 'Acceder al Sistema'}
+                    </span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
                   </>
                 )}

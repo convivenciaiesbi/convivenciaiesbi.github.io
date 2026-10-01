@@ -11,6 +11,7 @@ const SESSION_TYPE_KEY = 'sigc_bi_session_type_v1';
 const LAST_ACTIVITY_KEY = 'sigc_bi_last_activity_v1';
 const LOGOUT_REASON_KEY = 'sigc_bi_logout_reason_v1';
 const CREDENTIALS_HASH_KEY = 'sigc_bi_teacher_hashes_v3';
+const RESET_CREDENTIALS_EMAILS_KEY = 'sigc_bi_reset_credentials_emails_v1';
 const GOOGLE_CLIENT_ID_KEY = 'sigc_bi_google_oauth_client_id_v1';
 
 /**
@@ -290,17 +291,76 @@ export class AuthService {
   }
 
   /**
-   * Returns whether a teacher already has a registered password credential hash.
+   * Obtiene la lista de emails docentes que tienen un reseteo de clave pendiente.
+   */
+  static getResetCredentialsEmails(): string[] {
+    try {
+      const raw = localStorage.getItem(RESET_CREDENTIALS_EMAILS_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Guarda la lista de emails docentes que tienen un reseteo de clave pendiente.
+   */
+  static saveResetCredentialsEmails(emails: string[]): void {
+    try {
+      const unique = Array.from(new Set(emails.map((e) => e.toLowerCase().trim()).filter(Boolean)));
+      localStorage.setItem(RESET_CREDENTIALS_EMAILS_KEY, JSON.stringify(unique));
+    } catch {}
+  }
+
+  /**
+   * Marca un email docente con reseteo de clave pendiente.
+   */
+  static markEmailForPasswordReset(email: string): void {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail) return;
+    const list = this.getResetCredentialsEmails();
+    if (!list.includes(cleanEmail)) {
+      list.push(cleanEmail);
+      this.saveResetCredentialsEmails(list);
+    }
+  }
+
+  /**
+   * Elimina un email de la lista de reseteos pendientes tras establecer contraseña.
+   */
+  static clearEmailFromPasswordReset(email: string): void {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail) return;
+    const list = this.getResetCredentialsEmails().filter((e) => e !== cleanEmail);
+    this.saveResetCredentialsEmails(list);
+  }
+
+  /**
+   * Comprueba si un usuario tiene la indicación expresa de tener que cambiar la contraseña al entrar.
+   */
+  static requiresPasswordChange(email: string): boolean {
+    const cleanEmail = email.toLowerCase().trim();
+    if (this.getResetCredentialsEmails().includes(cleanEmail)) return true;
+    const teachersList = StorageService.getProfesores();
+    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
+    return Boolean(prof?.requiere_cambio_clave);
+  }
+
+  /**
+   * Returns whether a teacher already has an active, valid registered password credential hash.
    */
   static hasTeacherRegisteredPassword(email: string): boolean {
     const cleanEmail = email.toLowerCase().trim();
+    // Si tiene la indicación de cambio obligatorio de clave, se considera sin contraseña activa válida
+    if (this.requiresPasswordChange(cleanEmail)) return false;
+
     const store = this.getCredentialsStore();
     if (store[cleanEmail]) return true;
 
     // Comprobación redundante en la ficha del docente (custodiada en Google Drive)
     const teachersList = StorageService.getProfesores();
     const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
-    if (prof && prof.password_hash) {
+    if (prof && prof.password_hash && !prof.requiere_cambio_clave) {
       store[cleanEmail] = prof.password_hash;
       try {
         localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
@@ -316,13 +376,15 @@ export class AuthService {
    */
   static getTeacherHash(email: string): string | null {
     const cleanEmail = email.toLowerCase().trim();
+    if (this.requiresPasswordChange(cleanEmail)) return null;
+
     const store = this.getCredentialsStore();
     if (store[cleanEmail]) return store[cleanEmail];
 
     // Comprobación redundante en la ficha del docente
     const teachersList = StorageService.getProfesores();
     const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
-    if (prof && prof.password_hash) {
+    if (prof && prof.password_hash && !prof.requiere_cambio_clave) {
       store[cleanEmail] = prof.password_hash;
       try {
         localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
@@ -338,11 +400,14 @@ export class AuthService {
    */
   static getAllCredentials(): Record<string, string> {
     const store = this.getCredentialsStore();
+    const resetSet = new Set(this.getResetCredentialsEmails());
     // Consolidar también con los hashes presentes en las fichas de profesores
     const teachersList = StorageService.getProfesores();
     teachersList.forEach((p) => {
       const k = p.email.toLowerCase().trim();
-      if (p.password_hash && !store[k]) {
+      if (resetSet.has(k) || p.requiere_cambio_clave) {
+        delete store[k];
+      } else if (p.password_hash && !store[k]) {
         store[k] = p.password_hash;
       }
     });
@@ -356,14 +421,16 @@ export class AuthService {
     const cleanEmail = email.toLowerCase().trim();
     if (!cleanEmail || !hash) return;
     try {
+      this.clearEmailFromPasswordReset(cleanEmail);
       const store = this.getCredentialsStore();
       store[cleanEmail] = hash;
       localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
 
       const profs = StorageService.getProfesores();
       const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1 && profs[idx].password_hash !== hash) {
+      if (idx !== -1) {
         profs[idx].password_hash = hash;
+        profs[idx].requiere_cambio_clave = false;
         StorageService.saveProfesores(profs);
       }
     } catch (e) {
@@ -372,18 +439,61 @@ export class AuthService {
   }
 
   /**
+   * Elimina directamente un hash de credencial cuando se ha revocado en otro equipo.
+   */
+  static removeTeacherHashDirect(email: string): void {
+    const cleanEmail = email.toLowerCase().trim();
+    if (!cleanEmail) return;
+    try {
+      this.markEmailForPasswordReset(cleanEmail);
+      const store = this.getCredentialsStore();
+      delete store[cleanEmail];
+      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+
+      const profs = StorageService.getProfesores();
+      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
+      if (idx !== -1) {
+        delete profs[idx].password_hash;
+        profs[idx].requiere_cambio_clave = true;
+        StorageService.saveProfesores(profs);
+      }
+    } catch (e) {
+      console.error('Error eliminando hash de credencial:', e);
+    }
+  }
+
+  /**
    * Fusiona hashes de credenciales provenientes de la base de datos centralizada de Google Drive.
    */
-  static mergeRemoteCredentials(remoteStore: Record<string, string>): void {
+  static mergeRemoteCredentials(remoteStore: Record<string, string>, resetEmails: string[] = []): void {
     if (!remoteStore || typeof remoteStore !== 'object') return;
     try {
+      const resetSet = new Set([...this.getResetCredentialsEmails(), ...resetEmails.map((e) => e.toLowerCase().trim())]);
       const localStore = this.getCredentialsStore();
       let changed = false;
       const profs = StorageService.getProfesores();
       let profsChanged = false;
 
+      // 1. Limpiar cualquier email que esté en la lista de reseteos pendientes
+      for (const email of resetSet) {
+        if (localStore[email]) {
+          delete localStore[email];
+          changed = true;
+        }
+      }
+
+      // 2. Fusionar las credenciales remotas activas
       for (const [email, hash] of Object.entries(remoteStore)) {
         const cleanEmail = email.toLowerCase().trim();
+        // Si el usuario está pendiente de reseteo, ignorar cualquier hash remoto antiguo
+        if (resetSet.has(cleanEmail)) {
+          if (localStore[cleanEmail]) {
+            delete localStore[cleanEmail];
+            changed = true;
+          }
+          continue;
+        }
+
         if (cleanEmail && hash && (!localStore[cleanEmail] || localStore[cleanEmail] !== hash)) {
           localStore[cleanEmail] = hash;
           changed = true;
@@ -391,6 +501,7 @@ export class AuthService {
           const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
           if (idx !== -1 && profs[idx].password_hash !== hash) {
             profs[idx].password_hash = hash;
+            profs[idx].requiere_cambio_clave = false;
             profsChanged = true;
           }
         }
@@ -416,12 +527,15 @@ export class AuthService {
       const hash = sha256Hex(plainPassword.trim());
       store[cleanEmail] = hash;
       localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+      this.clearEmailFromPasswordReset(cleanEmail);
 
       // Guardar también en la ficha del profesor para que viaje con el censo en Drive
       const profs = StorageService.getProfesores();
       const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
       if (idx !== -1) {
         profs[idx].password_hash = hash;
+        profs[idx].requiere_cambio_clave = false;
+        profs[idx].fecha_modificacion_clave = new Date().toISOString();
         StorageService.saveProfesores(profs);
       }
       return true;
@@ -431,8 +545,8 @@ export class AuthService {
   }
 
   /**
-   * Restablece la contraseña de un docente (elimina su hash almacenado)
-   * para que pueda volver a configurarla en su próximo inicio de sesión (Primer Acceso).
+   * Restablece la contraseña de un docente (elimina su hash almacenado y activa requiere_cambio_clave)
+   * para que obligatoriamente deba definir una nueva contraseña en su próximo inicio de sesión en cualquier equipo.
    * Registra la acción en la auditoría inmutable del centro.
    */
   static resetTeacherPassword(email: string, adminEmail: string = 'mgonruz857@g.educaand.es'): boolean {
@@ -441,11 +555,14 @@ export class AuthService {
       const store = this.getCredentialsStore();
       delete store[cleanEmail];
       localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
+      this.markEmailForPasswordReset(cleanEmail);
 
       const profs = StorageService.getProfesores();
       const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1 && profs[idx].password_hash) {
+      if (idx !== -1) {
         delete profs[idx].password_hash;
+        profs[idx].requiere_cambio_clave = true;
+        profs[idx].fecha_modificacion_clave = new Date().toISOString();
         StorageService.saveProfesores(profs);
       }
       
@@ -453,7 +570,7 @@ export class AuthService {
         adminEmail,
         'ACTUALIZACION_SISTEMA',
         `Docente/${cleanEmail}`,
-        `Restablecimiento de credenciales de acceso para el docente ${cleanEmail}. Se requerirá nueva contraseña en el próximo inicio de sesión.`
+        `Restablecimiento obligatorio de credenciales de acceso para el docente ${cleanEmail}. Se requerirá nueva contraseña en el próximo inicio de sesión en cualquier dispositivo.`
       );
       return true;
     } catch {
@@ -471,6 +588,7 @@ export class AuthService {
       if (!newPassword || newPassword.trim().length < 4) {
         return false;
       }
+      this.clearEmailFromPasswordReset(cleanEmail);
       this.setTeacherPassword(cleanEmail, newPassword.trim());
 
       StorageService.addAuditLog(
@@ -566,11 +684,12 @@ export class AuthService {
     }
 
     // 5. Supervisión y verificación criptográfica de la contraseña
+    const requiresChange = this.requiresPasswordChange(cleanEmail);
     const inputHash = sha256Hex(cleanPassword);
     const storedHash = this.getTeacherHash(cleanEmail);
 
-    if (storedHash) {
-      // Si ya existe una credencial vinculada para este docente, debe coincidir exactamente
+    if (storedHash && !requiresChange) {
+      // Si ya existe una credencial vinculada para este docente y no requiere cambio, debe coincidir exactamente
       if (inputHash !== storedHash) {
         return {
           success: false,
@@ -578,12 +697,12 @@ export class AuthService {
         };
       }
     } else {
-      // Primer acceso del docente del claustro: validación de requisitos de complejidad moderados
+      // Primer acceso o cambio obligatorio de contraseña ordenado por Jefatura
       const complexity = this.validatePasswordComplexity(cleanPassword);
       if (!complexity.valid) {
         return {
           success: false,
-          error: `Requisito de contraseña (Primer Acceso): ${complexity.error}`,
+          error: `Requisito de contraseña: ${complexity.error}`,
         };
       }
       // Vinculación de la nueva contraseña
@@ -593,7 +712,9 @@ export class AuthService {
         cleanEmail,
         'ACTUALIZACION_SISTEMA',
         `Docente/${cleanEmail}`,
-        `Primer acceso completado: Contraseña inicial establecida por el propio docente ${cleanEmail}.`
+        requiresChange
+          ? `Cambio obligatorio de contraseña completado con éxito por el docente ${cleanEmail}.`
+          : `Primer acceso completado: Contraseña inicial establecida por el propio docente ${cleanEmail}.`
       );
     }
 

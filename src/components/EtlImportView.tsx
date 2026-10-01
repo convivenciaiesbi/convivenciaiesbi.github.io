@@ -455,6 +455,7 @@ El Amrani Youssef,4º ESO D`;
       setProfesorABajar(null);
       setMotivoBajaInput('');
       onImportCompleted();
+      GoogleDriveSyncService.pushToGoogleDrive().catch(console.warn);
     } else {
       alert(res.error || 'Error al tramitar la baja del docente.');
     }
@@ -465,6 +466,7 @@ El Amrani Youssef,4º ESO D`;
       const res = StorageService.reactivarProfesor(prof.id_profesor, currentUser.email);
       if (res.success) {
         onImportCompleted();
+        GoogleDriveSyncService.pushToGoogleDrive().catch(console.warn);
       } else {
         alert(res.error || 'Error al reactivar docente.');
       }
@@ -480,6 +482,7 @@ El Amrani Youssef,4º ESO D`;
           text: `Docente ${prof.nombre} ${prof.apellidos} eliminado de forma permanente del sistema.`
         });
         onImportCompleted();
+        GoogleDriveSyncService.pushToGoogleDrive().catch(console.warn);
         setTimeout(() => setActionFeedbackMsg(null), 5000);
       } else {
         alert(res.error || 'Error al eliminar al docente.');
@@ -502,7 +505,7 @@ El Amrani Youssef,4º ESO D`;
     }
   };
 
-  const handleCrearNuevoProfesor = (e: React.FormEvent) => {
+  const handleCrearNuevoProfesor = async (e: React.FormEvent) => {
     e.preventDefault();
     setAltaError(null);
 
@@ -534,7 +537,17 @@ El Amrani Youssef,4º ESO D`;
       setNuevoProfDpto('');
       setNuevoProfRol('ROLE_DOCENTE');
       setNuevoProfTutor('');
+      setActionFeedbackMsg({
+        type: 'success',
+        text: `Docente ${res.profesor?.nombre} ${res.profesor?.apellidos} dado de alta y sincronizado en Google Drive con éxito.`
+      });
       onImportCompleted();
+      setTimeout(() => setActionFeedbackMsg(null), 5000);
+      try {
+        await GoogleDriveSyncService.pushToGoogleDrive();
+      } catch (e) {
+        console.warn('Error sincronizando nuevo docente en Drive:', e);
+      }
     } else {
       setAltaError(res.error || 'Error al crear el docente.');
     }
@@ -553,7 +566,7 @@ El Amrani Youssef,4º ESO D`;
   };
 
   // Guardar edición de docente
-  const handleGuardarEdicionProfesor = (e: React.FormEvent) => {
+  const handleGuardarEdicionProfesor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profesorAEditar) return;
     setEditProfError(null);
@@ -570,11 +583,16 @@ El Amrani Youssef,4º ESO D`;
     if (res.success) {
       setActionFeedbackMsg({
         type: 'success',
-        text: `Docente ${editProfNombre.trim()} ${editProfApellidos.trim()} actualizado correctamente en el claustro.`
+        text: `Docente ${editProfNombre.trim()} ${editProfApellidos.trim()} actualizado y sincronizado en Google Drive con éxito.`
       });
       setProfesorAEditar(null);
       onImportCompleted();
       setTimeout(() => setActionFeedbackMsg(null), 5000);
+      try {
+        await GoogleDriveSyncService.pushToGoogleDrive();
+      } catch (e) {
+        console.warn('Error sincronizando edición de docente en Drive:', e);
+      }
     } else {
       setEditProfError(res.error || 'Error al actualizar docente.');
     }

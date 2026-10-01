@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Sancion, Alumno } from '../types/convivencia';
 import { MATRIZ_ROF_CATALOG, obtenerTipificacionNormativa } from '../data/rofCatalog';
-import iesCrest from '../assets/images/ies_blas_infante_crest_1790178434654.jpg';
+import iesCrest from '../assets/images/logo_rectangular_iesbi.png';
 import juntaLogo from '../assets/images/junta_andalucia_logo.jpg';
 import { generateOfficialSancionPdf } from '../utils/pdfGenerator';
 

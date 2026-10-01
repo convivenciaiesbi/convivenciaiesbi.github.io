@@ -34,7 +34,7 @@ import { StorageService } from '../services/storageService';
 import { AuthService } from '../services/authService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
 import { ESTRUCTURA_DRIVE_OFICIAL, generarGoogleAppsScriptCreacion, generarGoogleAppsScriptDatabaseBackend } from '../services/driveProvisioningService';
-import iesLogo from '../assets/images/ies_blas_infante_crest_1790178434654.jpg';
+import iesLogo from '../assets/images/logo_rectangular_iesbi.png';
 
 interface DriveAuditModalProps {
   onClose: () => void;

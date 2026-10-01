@@ -33,6 +33,7 @@ export interface DriveDatabaseState {
   deleted_sanciones?: string[];
   deleted_alumnos?: string[];
   deleted_profesores?: string[];
+  reset_credenciales_emails?: string[];
 }
 
 export class GoogleDriveSyncService {
@@ -128,6 +129,7 @@ export class GoogleDriveSyncService {
       deleted_sanciones: StorageService.getDeletedSancionIds(),
       deleted_alumnos: StorageService.getDeletedAlumnoIds(),
       deleted_profesores: StorageService.getDeletedProfesorIds(),
+      reset_credenciales_emails: AuthService.getResetCredentialsEmails(),
     };
   }
 
@@ -228,6 +230,12 @@ export class GoogleDriveSyncService {
       const allDeletedProfs = new Set<string>([...remoteDeletedProfs, ...localDeletedProfs]);
       StorageService.saveDeletedProfesorIds(Array.from(allDeletedProfs));
 
+      // Reconciliación de reseteos de contraseñas de docentes
+      const remoteResets = new Set<string>((remoteData.reset_credenciales_emails || []).map((e: string) => (e || '').toLowerCase().trim()));
+      const localResets = new Set<string>(AuthService.getResetCredentialsEmails());
+      const allResets = new Set<string>([...remoteResets, ...localResets]);
+      AuthService.saveResetCredentialsEmails(Array.from(allResets));
+
       const pendingSyncSancionIds = new Set<string>(StorageService.getPendingSyncSancionIds());
 
       // 1. Fusión de Profesores (Unión por id o email respetando eliminados)
@@ -236,9 +244,16 @@ export class GoogleDriveSyncService {
         const profMap = new Map<string, Profesor>();
         remoteData.profesores.forEach((p: Profesor) => {
           if (p?.email && !allDeletedProfs.has(p.id_profesor) && !allDeletedProfs.has(p.email)) {
-            profMap.set(p.email.toLowerCase().trim(), p);
-            // Si el docente viene con su contraseña criptográfica desde Drive, sincronizarla al instante
-            if (p.password_hash) {
+            const cleanEm = p.email.toLowerCase().trim();
+            profMap.set(cleanEm, p);
+
+            // Si el docente viene con reseteo de clave o indicación de cambio obligatorio
+            if (allResets.has(cleanEm) || p.requiere_cambio_clave) {
+              p.requiere_cambio_clave = true;
+              p.password_hash = undefined;
+              AuthService.removeTeacherHashDirect(cleanEm);
+            } else if (p.password_hash) {
+              // Si el docente viene con su contraseña criptográfica activa desde Drive, sincronizarla al instante
               AuthService.setTeacherHashDirect(p.email, p.password_hash);
             }
           }
@@ -251,7 +266,12 @@ export class GoogleDriveSyncService {
               profMap.set(k, lp);
               localHasPendingData = true;
             } else {
-              if (lp.password_hash && !existing.password_hash) {
+              // Si está marcado para reseteo o cambio obligatorio, NUNCA resucitar el hash viejo local
+              if (allResets.has(k) || existing.requiere_cambio_clave) {
+                existing.requiere_cambio_clave = true;
+                existing.password_hash = undefined;
+                AuthService.removeTeacherHashDirect(k);
+              } else if (lp.password_hash && !existing.password_hash) {
                 existing.password_hash = lp.password_hash;
                 localHasPendingData = true;
               }
@@ -263,7 +283,7 @@ export class GoogleDriveSyncService {
 
       // 2. Fusión de Credenciales Centralizadas
       if (remoteData.credenciales_profesores && typeof remoteData.credenciales_profesores === 'object') {
-        AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores);
+        AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores, Array.from(allResets));
       }
 
       // 3. Fusión de Sanciones (con eliminación real e inmediata en todos los clientes)
