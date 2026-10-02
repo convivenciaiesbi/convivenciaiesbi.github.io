@@ -43,10 +43,12 @@ import { StorageService } from '../services/storageService';
 import { AuthService } from '../services/authService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
 import { esGrupoInformatica } from '../data/rofCatalog';
+import { EditarParteModal } from './EditarParteModal';
 
 interface CarnetListViewProps {
   alumnos: Alumno[];
   sanciones: Sancion[];
+  profesores?: Profesor[];
   compensaciones?: any[];
   currentUser: Profesor;
   initialFilterEstado?: string;
@@ -57,6 +59,7 @@ interface CarnetListViewProps {
   onPrintParte?: (sancion: Sancion) => void;
   onDataChanged?: () => void;
   onDeleteParte?: (idSancion: string, motivo: string) => { success: boolean; alumnoActualizado?: Alumno; sancionEliminada?: Sancion; error?: string };
+  onEditParte?: (idSancion: string, cambios: Partial<Sancion>, motivo: string) => { success: boolean; sancionModificada?: Sancion; alumnoActualizado?: Alumno; error?: string };
 }
 
 // Filtros rápidos oficiales V0 (Página 4)
@@ -65,6 +68,7 @@ type FiltroRapidoV0 = 'TODOS' | 'HOY' | 'GRAVES' | 'CERO_PUNTOS' | 'PENDIENTES';
 export const CarnetListView: React.FC<CarnetListViewProps> = ({
   alumnos,
   sanciones,
+  profesores = [],
   currentUser,
   initialFilterEstado,
   initialFilterGrupo,
@@ -74,6 +78,7 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
   onPrintParte,
   onDataChanged,
   onDeleteParte,
+  onEditParte,
 }) => {
   const isAdmin = AuthService.isAdmin(currentUser);
 
@@ -84,6 +89,9 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
   } | null>(null);
   const [deleteMotivo, setDeleteMotivo] = useState<string>('Estimación de alegaciones / Corrección de error');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit modal state (Equipo de Convivencia / Jefatura / Autor)
+  const [parteToEdit, setParteToEdit] = useState<Sancion | null>(null);
 
   // Filtro rápido V0 (Página 4: Partes de hoy | Partes graves | Alumnos con 0 puntos | Pendientes de revisión)
   const [filtroRapido, setFiltroRapido] = useState<FiltroRapidoV0>(() => {
@@ -141,6 +149,16 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
       }
     }
   }, [focusedAlumnoId, alumnos]);
+
+  // Mantener sincronizado el modal de historial si se actualizan los puntos del alumno (por ejemplo al eliminar un parte)
+  useEffect(() => {
+    if (historyModalAlumno) {
+      const target = alumnos.find(a => a.id_alumno === historyModalAlumno.id_alumno);
+      if (target && (target.puntos_actuales !== historyModalAlumno.puntos_actuales || target.estado !== historyModalAlumno.estado || target.historial_sanciones_count !== historyModalAlumno.historial_sanciones_count)) {
+        setHistoryModalAlumno(target);
+      }
+    }
+  }, [alumnos, historyModalAlumno]);
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -902,6 +920,16 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
                               <Printer className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          {isAdmin && onEditParte && (
+                            <button
+                              type="button"
+                              onClick={() => setParteToEdit(s)}
+                              title="Modificar datos o tipificación de este parte"
+                              className="p-1.5 text-slate-400 hover:text-sky-700 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           {isAdmin && onDeleteParte && (
                             <button
                               type="button"
@@ -1659,6 +1687,18 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL MODIFICAR PARTE */}
+      {parteToEdit && onEditParte && (
+        <EditarParteModal
+          sancion={parteToEdit}
+          alumnos={alumnos}
+          profesores={profesores}
+          currentUser={currentUser}
+          onSave={onEditParte}
+          onClose={() => setParteToEdit(null)}
+        />
       )}
     </div>
   );

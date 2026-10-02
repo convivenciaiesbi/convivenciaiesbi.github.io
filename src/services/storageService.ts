@@ -1350,6 +1350,10 @@ export class StorageService {
     sanciones.unshift(nuevaSancion);
     this.saveSanciones(sanciones);
 
+    // Recalcular saldo exacto del alumno tras asentar la sanción
+    const alumnosActualizados = this.recalcularPuntosAlumnos(alumno.id_alumno);
+    const alumnoFinal = alumnosActualizados.find(a => a.id_alumno === alumno.id_alumno) || alumnoActualizado;
+
     // Registra movimiento en el histórico de puntos (V0 - Sección 1)
     this.registrarMovimiento({
       id_alumno: alumno.id_alumno,
@@ -1359,12 +1363,12 @@ export class StorageService {
       puntos: -puntosDescontar,
       profesor_nombre: sancionData.nombre_profesor,
       saldo_anterior: puntosPrevios,
-      saldo_resultante: nuevosPuntos,
+      saldo_resultante: alumnoFinal.puntos_actuales,
       detalles: sancionData.descripcion_hechos,
     });
 
     // Auditoría y Alertas mínimas a Jefatura/Convivencia (V0 - Sección 7)
-    let logDetalle = `Parte ${sancionData.codigo_infraccion} a ${alumno.nombre} ${alumno.apellidos} (-${puntosDescontar} pts). Saldo: ${puntosPrevios} -> ${nuevosPuntos}. Medida: ${sancionData.medida_inmediata_texto || sancionData.medida_inmediata || 'Registrada'}.`;
+    let logDetalle = `Parte ${sancionData.codigo_infraccion} a ${alumno.nombre} ${alumno.apellidos} (-${puntosDescontar} pts). Saldo: ${puntosPrevios} -> ${alumnoFinal.puntos_actuales}. Medida: ${sancionData.medida_inmediata_texto || sancionData.medida_inmediata || 'Registrada'}.`;
     if (saldoCero) {
       logDetalle += ' [ALERTA: Saldo 0 puntos alcanzado - Requiere valoración de Jefatura]';
     }
@@ -1379,7 +1383,154 @@ export class StorageService {
       logDetalle
     );
 
-    return { sancion: nuevaSancion, alumnoActualizado, saldoCero, alertaGrave };
+    return { sancion: nuevaSancion, alumnoActualizado: alumnoFinal, saldoCero: alumnoFinal.puntos_actuales === 0, alertaGrave };
+  }
+
+  /**
+   * Recalcula el saldo real de puntos de los alumnos garantizando coherencia
+   * matemática absoluta entre sanciones activas, eliminadas y medidas restaurativas.
+   */
+  static recalcularPuntosAlumnos(targetIdAlumno?: string): Alumno[] {
+    const alumnos = this.getAlumnos();
+    const sanciones = this.getSanciones();
+    const deletedSancionIds = new Set(this.getDeletedSancionIds());
+    const activeSanciones = sanciones.filter(s => s && s.id_sancion && !deletedSancionIds.has(s.id_sancion));
+    const movimientos = this.getMovimientos();
+
+    let modificado = false;
+    const cleanTargetId = targetIdAlumno ? targetIdAlumno.toLowerCase().trim() : null;
+
+    const alumnosActualizados = alumnos.map(alumno => {
+      const cleanAlumnoId = (alumno.id_alumno || '').toLowerCase().trim();
+      if (cleanTargetId && cleanAlumnoId !== cleanTargetId) {
+        return alumno;
+      }
+
+      // Sanciones activas de este alumno
+      const sancionesAlumno = activeSanciones.filter(s => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId);
+      const totalPuntosPerdidos = sancionesAlumno.reduce((acc, s) => acc + (Math.max(0, s.puntos_restados || 0)), 0);
+
+      // Movimientos de recuperación/compensación de este alumno (excluyendo compensaciones automáticas de partes que ya no restan)
+      const movsAlumno = movimientos.filter(m => 
+        (m.id_alumno || '').toLowerCase().trim() === cleanAlumnoId && 
+        (m.tipo === 'MEDIDA_RESTAURATIVA' || m.tipo === 'RECUPERACION_SEMANAL')
+      );
+      const totalPuntosRecuperados = movsAlumno.reduce((acc, m) => acc + (Math.max(0, m.puntos || 0)), 0);
+
+      // Cálculo del saldo real: 10 - perdidos + recuperados, acotado estrictamente entre 0 y 10
+      const saldoCalculado = Math.max(0, Math.min(10, 10 - totalPuntosPerdidos + totalPuntosRecuperados));
+      const countSanciones = sancionesAlumno.length;
+
+      let nuevoEstado: Alumno['estado'] = alumno.estado;
+      if (alumno.estado !== 'BAJA') {
+        nuevoEstado = saldoCalculado === 0 ? 'SALDO_CERO' : (saldoCalculado <= 3 ? 'ALERTA_PUNTOS' : 'ACTIVO');
+      }
+
+      if (alumno.puntos_actuales !== saldoCalculado || alumno.historial_sanciones_count !== countSanciones || alumno.estado !== nuevoEstado) {
+        modificado = true;
+        return {
+          ...alumno,
+          puntos_actuales: saldoCalculado,
+          historial_sanciones_count: countSanciones,
+          estado: nuevoEstado,
+        };
+      }
+
+      return alumno;
+    });
+
+    if (modificado) {
+      this.saveAlumnos(alumnosActualizados);
+    }
+
+    return alumnosActualizados;
+  }
+
+  /**
+   * MODIFICACIÓN DE PARTE DISCIPLINARIO (Equipo de Convivencia / Jefatura de Estudios / Autor)
+   * - Permite modificar cualquier dato del parte (infracción, puntos, hechos, fecha, docente, etc.).
+   * - Si se modifican los puntos restados o el alumno asignado, recalcula automáticamente los saldos de carnet de los alumnos afectados.
+   * - Registra movimiento aclaratorio en el histórico de puntos si hubo cambio de puntos o alumno.
+   * - Registra entrada inmutable en la auditoría RGPD.
+   */
+  static modificarSancion(
+    idSancion: string,
+    cambios: Partial<Sancion>,
+    usuarioEmail: string,
+    motivoModificacion: string
+  ): { success: boolean; sancionModificada?: Sancion; alumnoActualizado?: Alumno; error?: string } {
+    const sanciones = this.getSanciones();
+    const sancionIdx = sanciones.findIndex(s => s.id_sancion === idSancion);
+    if (sancionIdx === -1) {
+      return { success: false, error: 'Parte de convivencia no encontrado en el sistema.' };
+    }
+
+    const sancionOriginal = sanciones[sancionIdx];
+    const oldAlumnoId = sancionOriginal.id_alumno;
+    const newAlumnoId = cambios.id_alumno || oldAlumnoId;
+    const oldPuntosRestados = Math.max(0, sancionOriginal.puntos_restados || 0);
+    const newPuntosRestados = cambios.puntos_restados !== undefined 
+      ? Math.max(0, cambios.puntos_restados) 
+      : oldPuntosRestados;
+
+    // Actualizar campos
+    const sancionActualizada: Sancion = {
+      ...sancionOriginal,
+      ...cambios,
+      puntos_restados: newPuntosRestados,
+      id_sancion: sancionOriginal.id_sancion, // Invariable
+      numero_expediente: sancionOriginal.numero_expediente, // Invariable
+    };
+
+    sanciones[sancionIdx] = sancionActualizada;
+    this.saveSanciones(sanciones);
+
+    // Asegurar que no esté en deleted y quede pendiente para sincronizar con Drive
+    this.removeDeletedSancionId(idSancion);
+    this.addPendingSyncSancionId(idSancion);
+
+    // Recalcular saldo de los alumnos involucrados
+    if (oldAlumnoId !== newAlumnoId) {
+      this.recalcularPuntosAlumnos(oldAlumnoId);
+    }
+    const alumnosActualizados = this.recalcularPuntosAlumnos(newAlumnoId);
+    const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === newAlumnoId);
+
+    // Si hubo cambio de puntos o de alumno, registrar movimiento aclaratorio
+    if (oldPuntosRestados !== newPuntosRestados || oldAlumnoId !== newAlumnoId) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const difPuntos = oldPuntosRestados - newPuntosRestados;
+      this.registrarMovimiento({
+        id_alumno: newAlumnoId,
+        fecha: todayStr,
+        tipo: 'COMPENSACION',
+        conducta_titulo: `Modificación de parte: ${sancionActualizada.codigo_infraccion} (${sancionActualizada.numero_expediente})`,
+        puntos: difPuntos,
+        profesor_nombre: 'Equipo de Convivencia',
+        saldo_anterior: Math.max(0, (alumnoActualizado?.puntos_actuales || 10) - difPuntos),
+        saldo_resultante: alumnoActualizado?.puntos_actuales || 10,
+        detalles: `Modificación por Equipo de Convivencia: Puntos pasaron de -${oldPuntosRestados} a -${newPuntosRestados} pts. Motivo: ${motivoModificacion.trim() || 'Ajuste de tipificación/hechos'}`
+      });
+    }
+
+    // Auditoría inmutable de no repudio
+    const expediente = sancionActualizada.numero_expediente || sancionActualizada.id_sancion;
+    const nombreAlumno = alumnoActualizado 
+      ? `${alumnoActualizado.nombre} ${alumnoActualizado.apellidos}` 
+      : newAlumnoId;
+
+    this.addAuditLog(
+      usuarioEmail,
+      'MODIFICAR_PARTE',
+      `Sancion/${expediente}`,
+      `Modificación de parte ${expediente} (${sancionActualizada.codigo_infraccion}) de ${nombreAlumno}. Puntos: -${oldPuntosRestados} -> -${newPuntosRestados} pts (Saldo resultante: ${alumnoActualizado?.puntos_actuales !== undefined ? alumnoActualizado.puntos_actuales : 'N/A'}). Motivo: ${motivoModificacion.trim() || 'Corrección de datos / Estimación'}`
+    );
+
+    return {
+      success: true,
+      sancionModificada: sancionActualizada,
+      alumnoActualizado,
+    };
   }
 
   /**
@@ -1404,52 +1555,33 @@ export class StorageService {
     const sancion = sanciones[sancionIdx];
     const puntosRestituidos = Math.max(0, sancion.puntos_restados || 0);
 
-    const alumnos = this.getAlumnos();
-    const alumnoIdx = alumnos.findIndex(a => a.id_alumno === sancion.id_alumno);
-    let alumnoActualizado: Alumno | undefined = undefined;
-
-    if (alumnoIdx !== -1) {
-      const alumno = alumnos[alumnoIdx];
-      const saldoAnterior = alumno.puntos_actuales;
-      const nuevoSaldo = Math.min(10, saldoAnterior + puntosRestituidos);
-      const nuevoEstado: Alumno['estado'] = nuevoSaldo === 0 
-        ? 'SALDO_CERO' 
-        : (nuevoSaldo <= 3 ? 'ALERTA_PUNTOS' : 'ACTIVO');
-
-      alumnoActualizado = {
-        ...alumno,
-        puntos_actuales: nuevoSaldo,
-        estado: nuevoEstado,
-        historial_sanciones_count: Math.max(0, (alumno.historial_sanciones_count || 1) - 1),
-      };
-
-      alumnos[alumnoIdx] = alumnoActualizado;
-      this.saveAlumnos(alumnos);
-
-      if (puntosRestituidos > 0) {
-        const todayStr = new Date().toISOString().split('T')[0];
-        this.registrarMovimiento({
-          id_alumno: alumno.id_alumno,
-          fecha: todayStr,
-          tipo: 'COMPENSACION',
-          conducta_titulo: `Anulación de parte: ${sancion.codigo_infraccion} (${sancion.numero_expediente || 'Expediente'})`,
-          puntos: puntosRestituidos,
-          profesor_nombre: 'Equipo de Convivencia',
-          saldo_anterior: saldoAnterior,
-          saldo_resultante: nuevoSaldo,
-          detalles: `Parte eliminado por el Equipo de Convivencia. Motivo: ${motivo.trim() || 'Estimación de alegaciones / Corrección de error'}`
-        });
-      }
-    }
-
-    // Registrar el ID de la sanción como eliminada para que ningún otro dispositivo la resucite
+    // 1. Registrar el ID de la sanción como eliminada para que ningún otro dispositivo la resucite
     this.addDeletedSancionId(idSancion);
 
-    // Retirar la sanción
+    // 2. Retirar la sanción de la lista activa
     sanciones.splice(sancionIdx, 1);
     this.saveSanciones(sanciones);
 
-    // Auditoría inmutable de no repudio
+    // 3. Recalcular y actualizar inmediatamente el saldo oficial del alumno
+    const alumnosActualizados = this.recalcularPuntosAlumnos(sancion.id_alumno);
+    const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === sancion.id_alumno);
+
+    if (alumnoActualizado && puntosRestituidos > 0) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      this.registrarMovimiento({
+        id_alumno: alumnoActualizado.id_alumno,
+        fecha: todayStr,
+        tipo: 'COMPENSACION',
+        conducta_titulo: `Anulación de parte: ${sancion.codigo_infraccion} (${sancion.numero_expediente || 'Expediente'})`,
+        puntos: puntosRestituidos,
+        profesor_nombre: 'Equipo de Convivencia',
+        saldo_anterior: Math.max(0, alumnoActualizado.puntos_actuales - puntosRestituidos),
+        saldo_resultante: alumnoActualizado.puntos_actuales,
+        detalles: `Parte eliminado por el Equipo de Convivencia. Motivo: ${motivo.trim() || 'Estimación de alegaciones / Corrección de error'}`
+      });
+    }
+
+    // 4. Auditoría inmutable de no repudio
     const expediente = sancion.numero_expediente || sancion.id_sancion;
     const nombreAlumno = alumnoActualizado 
       ? `${alumnoActualizado.nombre} ${alumnoActualizado.apellidos}` 
@@ -1459,7 +1591,7 @@ export class StorageService {
       usuarioEmail,
       'ELIMINAR_PARTE',
       `Sancion/${expediente}`,
-      `Eliminación oficial de parte ${expediente} (${sancion.codigo_infraccion}) de ${nombreAlumno}. Restituidos: +${puntosRestituidos} pts (Saldo: ${alumnoActualizado ? `${alumnoActualizado.puntos_actuales - puntosRestituidos} -> ${alumnoActualizado.puntos_actuales}` : 'N/A'}). Motivo: ${motivo.trim() || 'Estimación de alegaciones'}`
+      `Eliminación oficial de parte ${expediente} (${sancion.codigo_infraccion}) de ${nombreAlumno}. Restituidos: +${puntosRestituidos} pts (Saldo resultante: ${alumnoActualizado ? `${alumnoActualizado.puntos_actuales}` : 'N/A'}). Motivo: ${motivo.trim() || 'Estimación de alegaciones'}`
     );
 
     return {

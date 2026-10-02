@@ -347,7 +347,7 @@ export class GoogleDriveSyncService {
         StorageService.saveCompensaciones(Array.from(compMap.values()));
       }
 
-      // 5. Fusión de Alumnos (Remote es la autoridad de saldo cuando se anulan/eliminan partes)
+      // 5. Fusión de Alumnos y Recalculación Oficial de Saldos de Carnet
       if (remoteData.alumnos && Array.isArray(remoteData.alumnos)) {
         const localAlumnos = StorageService.getAlumnos();
         const alumnoMap = new Map<string, Alumno>();
@@ -366,12 +366,14 @@ export class GoogleDriveSyncService {
             alumnoMap.set(localA.id_alumno, localA);
             localHasPendingData = true;
           } else {
-            // Mantener datos fusionados dando prioridad a los puntos calculados de Drive
+            // Mantener datos fusionados de censo
             alumnoMap.set(localA.id_alumno, {
-              ...localA,
               ...existingRemote,
+              ...localA,
               telefono_tutor: existingRemote.telefono_tutor || localA.telefono_tutor || '',
               nombre_tutor: existingRemote.nombre_tutor || localA.nombre_tutor || '',
+              nie: existingRemote.nie || localA.nie || '',
+              grupo: existingRemote.grupo || localA.grupo,
             });
           }
         });
@@ -380,6 +382,9 @@ export class GoogleDriveSyncService {
         // Depurar duplicados residuales si existieran
         StorageService.depurarAlumnosDuplicados('SISTEMA_SYNC');
       }
+
+      // 6. Recálculo automático estricto de puntos de carnet tras sincronizar sanciones y compensaciones
+      StorageService.recalcularPuntosAlumnos();
 
       // 6. Fusión de Audit Logs
       if (remoteData.audit_logs && Array.isArray(remoteData.audit_logs)) {

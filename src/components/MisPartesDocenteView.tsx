@@ -20,28 +20,34 @@ import {
   RefreshCw,
   Trash2,
   AlertTriangle,
-  X
+  X,
+  Pencil
 } from 'lucide-react';
 import { Sancion, Alumno, Profesor, EstadoTramitacion } from '../types/convivencia';
+import { EditarParteModal } from './EditarParteModal';
 
 interface MisPartesDocenteViewProps {
   sanciones: Sancion[];
   alumnos: Alumno[];
+  profesores?: Profesor[];
   currentUser: Profesor;
   onPrintSingleParte: (sancion: Sancion) => void;
   onNavigateToImponer: () => void;
   onManualSync?: () => Promise<void>;
   onDeleteParte?: (idSancion: string, motivo: string) => { success: boolean; alumnoActualizado?: Alumno; sancionEliminada?: Sancion; error?: string };
+  onEditParte?: (idSancion: string, cambios: Partial<Sancion>, motivo: string) => { success: boolean; sancionModificada?: Sancion; alumnoActualizado?: Alumno; error?: string };
 }
 
 export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
   sanciones,
   alumnos,
+  profesores = [],
   currentUser,
   onPrintSingleParte,
   onNavigateToImponer,
   onManualSync,
   onDeleteParte,
+  onEditParte,
 }) => {
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,6 +59,9 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
   const [parteToDelete, setParteToDelete] = useState<{ sancion: Sancion; alumno: Alumno } | null>(null);
   const [deleteMotivo, setDeleteMotivo] = useState<string>('Corrección de error / Parte emitido por error involuntario');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit modal state
+  const [parteToEdit, setParteToEdit] = useState<Sancion | null>(null);
 
   // Map of students
   const alumnoMap = useMemo(() => {
@@ -419,6 +428,17 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
                           <span>Imprimir / PDF</span>
                         </button>
 
+                        {onEditParte && (
+                          <button
+                            type="button"
+                            onClick={() => setParteToEdit(sancion)}
+                            className="p-1.5 text-slate-400 hover:text-sky-700 hover:bg-sky-50 border border-transparent hover:border-sky-200 rounded-xl transition-all cursor-pointer"
+                            title="Modificar datos o tipificación de este parte"
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {onDeleteParte && (
                           <button
                             type="button"
@@ -540,6 +560,18 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* MODAL MODIFICAR PARTE */}
+      {parteToEdit && onEditParte && (
+        <EditarParteModal
+          sancion={parteToEdit}
+          alumnos={alumnos}
+          profesores={profesores}
+          currentUser={currentUser}
+          onSave={onEditParte}
+          onClose={() => setParteToEdit(null)}
+        />
       )}
     </div>
   );

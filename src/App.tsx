@@ -151,6 +151,7 @@ export default function App() {
 
   // Load from StorageService on initial render
   const refreshAllData = () => {
+    StorageService.recalcularPuntosAlumnos();
     setAlumnos(StorageService.getAlumnos());
     setProfesores(StorageService.getProfesores());
     setSanciones(StorageService.getSanciones());
@@ -325,6 +326,16 @@ export default function App() {
     return result;
   };
 
+  // Modification of parte (Convivencia Team / Admin / Author)
+  const handleEditParte = (idSancion: string, cambios: Partial<Sancion>, motivo: string) => {
+    const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
+    const result = StorageService.modificarSancion(idSancion, cambios, userEmail, motivo);
+    refreshAllData();
+    notifyLocalSync();
+    GoogleDriveSyncService.triggerFastSync(100);
+    return result;
+  };
+
   // Reset all data to initial seed
   const handleResetData = () => {
     const userEmail = currentUser ? currentUser.email : 'mgonruz857@g.educaand.es';
@@ -436,6 +447,7 @@ export default function App() {
         {currentView === 'imponer' && (
           <FastParteModal
             alumnos={alumnos}
+            profesores={profesores}
             currentUser={currentUser}
             onSubmitSancion={handleImponerSancion}
             onPrintParte={(sancion) => setPrintableParte(sancion)}
@@ -454,6 +466,7 @@ export default function App() {
           <DailyFeedView
             sanciones={sanciones}
             alumnos={alumnos}
+            profesores={profesores}
             currentUser={currentUser}
             onUpdateTramitacion={handleUpdateTramitacion}
             onPrintSingleParte={(sancion) => setPrintableParte(sancion)}
@@ -465,6 +478,7 @@ export default function App() {
             }}
             onNavigateToPAC={() => setCurrentView('pac')}
             onDeleteParte={handleDeleteParte}
+            onEditParte={handleEditParte}
           />
         )}
 
@@ -472,6 +486,7 @@ export default function App() {
           <CarnetListView
             alumnos={alumnos}
             sanciones={sanciones}
+            profesores={profesores}
             compensaciones={compensaciones}
             currentUser={currentUser}
             initialFilterEstado={carnetInitialFilterEstado}
@@ -483,6 +498,7 @@ export default function App() {
             onPrintParte={(sancion) => setPrintableParte(sancion)}
             onDataChanged={refreshAllData}
             onDeleteParte={handleDeleteParte}
+            onEditParte={handleEditParte}
           />
         )}
 
@@ -491,10 +507,12 @@ export default function App() {
           <MisPartesDocenteView
             sanciones={sanciones}
             alumnos={alumnos}
+            profesores={profesores}
             currentUser={currentUser}
             onPrintSingleParte={(sancion) => setPrintableParte(sancion)}
             onNavigateToImponer={() => setCurrentView('imponer')}
             onDeleteParte={handleDeleteParte}
+            onEditParte={handleEditParte}
             onManualSync={async () => {
               const res = await GoogleDriveSyncService.pullFromGoogleDrive();
               if (res.success) {

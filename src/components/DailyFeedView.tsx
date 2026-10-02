@@ -26,15 +26,18 @@ import {
   ArrowRight,
   TrendingDown,
   Info,
-  Trash2
+  Trash2,
+  Pencil
 } from 'lucide-react';
 import { Sancion, Alumno, Profesor, EstadoTramitacion, CodigoInfraccionROF } from '../types/convivencia';
 import { MATRIZ_ROF_CATALOG } from '../data/rofCatalog';
 import { AuthService } from '../services/authService';
+import { EditarParteModal } from './EditarParteModal';
 
 interface DailyFeedViewProps {
   sanciones: Sancion[];
   alumnos: Alumno[];
+  profesores?: Profesor[];
   currentUser: Profesor;
   onUpdateTramitacion: (
     idSancion: string,
@@ -47,6 +50,7 @@ interface DailyFeedViewProps {
   onNavigateToCarnet?: (idAlumno?: string) => void;
   onNavigateToPAC?: () => void;
   onDeleteParte?: (idSancion: string, motivo: string) => { success: boolean; alumnoActualizado?: Alumno; sancionEliminada?: Sancion; error?: string };
+  onEditParte?: (idSancion: string, cambios: Partial<Sancion>, motivo: string) => { success: boolean; sancionModificada?: Sancion; alumnoActualizado?: Alumno; error?: string };
 }
 
 type FeedDetailModalType = 'PARTES' | 'PENDIENTES' | 'PAC' | 'PUNTOS' | null;
@@ -54,6 +58,7 @@ type FeedDetailModalType = 'PARTES' | 'PENDIENTES' | 'PAC' | 'PUNTOS' | null;
 export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   sanciones,
   alumnos,
+  profesores = [],
   currentUser,
   onUpdateTramitacion,
   onPrintSingleParte,
@@ -62,6 +67,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   onNavigateToCarnet,
   onNavigateToPAC,
   onDeleteParte,
+  onEditParte,
 }) => {
   const today = new Date().toISOString().split('T')[0];
   const isAdmin = AuthService.isAdmin(currentUser);
@@ -83,6 +89,9 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   } | null>(null);
   const [deleteMotivo, setDeleteMotivo] = useState<string>('Estimación de alegaciones / Corrección de error');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit modal state (Equipo de Convivencia / Jefatura / Autor)
+  const [parteToEdit, setParteToEdit] = useState<Sancion | null>(null);
 
   // Telephone notification modal state
   const [activeCallModal, setActiveCallModal] = useState<{
@@ -519,6 +528,15 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                       <span className="text-[11px] font-mono text-sky-900 bg-sky-100/70 px-1.5 py-0.5 rounded-md">
                         {alumno.grupo}
                       </span>
+                      <span className={`text-[11px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                        alumno.puntos_actuales === 0 
+                          ? 'bg-rose-100 text-rose-800 border border-rose-200' 
+                          : alumno.puntos_actuales <= 3 
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      }`} title="Saldo de carnet actual del alumno">
+                        {alumno.puntos_actuales} / 10 pts
+                      </span>
                       <span className="text-slate-300">·</span>
                       <span className="text-[11px] text-slate-500 font-mono">
                         {sancion.tramo_horario.split('(')[0].trim()} ({sancion.fecha}{sancion.hora_incidente ? ` · ${sancion.hora_incidente}h` : ''})
@@ -625,6 +643,17 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                           className="p-1 rounded text-slate-400 hover:text-sky-700 hover:bg-sky-50 transition-colors cursor-pointer"
                         >
                           <CheckCircle className="w-4 h-4" />
+                        </button>
+                      )}
+
+                      {/* Edit parte (Convivencia / Admin team only) */}
+                      {isAdmin && onEditParte && (
+                        <button
+                          onClick={() => setParteToEdit(sancion)}
+                          title="Modificar Datos / Tipificación del Parte (Equipo de Convivencia)"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-sky-700 hover:bg-sky-50 transition-colors cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
                         </button>
                       )}
 
@@ -805,6 +834,19 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                                 >
                                   Ver Parte
                                 </button>
+                                {isAdmin && onEditParte && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveKpiModal(null);
+                                      setParteToEdit(s);
+                                    }}
+                                    title="Modificar parte oficial"
+                                    className="p-1 text-slate-400 hover:text-sky-700 hover:bg-sky-50 rounded transition-colors cursor-pointer"
+                                  >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
                                 {isAdmin && onDeleteParte && (
                                   <button
                                     type="button"
@@ -1464,6 +1506,18 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Modal */}
+      {parteToEdit && onEditParte && (
+        <EditarParteModal
+          sancion={parteToEdit}
+          alumnos={alumnos}
+          profesores={profesores}
+          currentUser={currentUser}
+          onSave={onEditParte}
+          onClose={() => setParteToEdit(null)}
+        />
       )}
     </div>
   );

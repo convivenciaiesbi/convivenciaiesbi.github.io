@@ -44,9 +44,11 @@ import {
   calcularPuntosInfraccion,
   esGrupoInformatica
 } from '../data/rofCatalog';
+import { AuthService } from '../services/authService';
 
 interface FastParteModalProps {
   alumnos: Alumno[];
+  profesores?: Profesor[];
   currentUser: Profesor;
   onSubmitSancion: (
     sancionData: Omit<Sancion, 'id_sancion' | 'numero_expediente' | 'url_pdf_drive'>
@@ -102,11 +104,25 @@ const deduceTramoFromTime = (timeStr: string): TramoHorario | null => {
 
 export const FastParteModal: React.FC<FastParteModalProps> = ({
   alumnos,
+  profesores = [],
   currentUser,
   onSubmitSancion,
   onPrintParte,
   onDone,
 }) => {
+  const isAdmin = AuthService.isAdmin(currentUser);
+
+  // Docente que comunica / emite el parte (configurable si es Administrador / Equipo de Convivencia)
+  const [selectedProfesorId, setSelectedProfesorId] = useState<string>(currentUser.id_profesor);
+  const selectedProfesor = useMemo(() => {
+    return profesores.find(p => p.id_profesor === selectedProfesorId) || currentUser;
+  }, [profesores, selectedProfesorId, currentUser]);
+
+  // Lista ordenada de profesores para el selector
+  const listaProfesoresOrdenada = useMemo(() => {
+    return [...profesores].sort((a, b) => (a.apellidos || '').localeCompare(b.apellidos || ''));
+  }, [profesores]);
+
   // 1. Grupo y Alumno
   const [selectedGrupo, setSelectedGrupo] = useState<GrupoEducativo>(
     (currentUser.tutor_de_grupo as GrupoEducativo) || '1ESO_A'
@@ -136,6 +152,20 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
   const [materia, setMateria] = useState<string>(currentUser.departamento.split('/')[0].trim());
   const [ubicacion, setUbicacion] = useState<UbicacionCentro>('Aula ordinaria');
   const [ubicacionOtrosDetalle, setUbicacionOtrosDetalle] = useState<string>('');
+
+  // Cambio de profesor informante
+  const handleProfesorChange = (newProfId: string) => {
+    setSelectedProfesorId(newProfId);
+    const prof = profesores.find(p => p.id_profesor === newProfId);
+    if (prof) {
+      if (prof.departamento) {
+        setMateria(prof.departamento.split('/')[0].trim());
+      }
+      if (prof.tutor_de_grupo) {
+        setSelectedGrupo(prof.tutor_de_grupo as GrupoEducativo);
+      }
+    }
+  };
 
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -262,8 +292,8 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
         hora_registro: horaActualRegistro,
         registro_diferido: isDiferido,
         id_alumno: selectedAlumno.id_alumno,
-        id_profesor: currentUser.id_profesor,
-        nombre_profesor: `${currentUser.nombre} ${currentUser.apellidos}`,
+        id_profesor: selectedProfesor.id_profesor,
+        nombre_profesor: `${selectedProfesor.nombre} ${selectedProfesor.apellidos}`,
         materia,
         codigo_infraccion: selectedConductaCodigo,
         tipo_conducta: activeTabTipo,
@@ -275,7 +305,7 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
         medida_inmediata_texto: medidaObj?.label || 'Amonestación verbal',
         detalle_pac: esPAC ? {
           hora_salida: horaIncidente,
-          profesor_deriva: `${currentUser.nombre} ${currentUser.apellidos}`,
+          profesor_deriva: `${selectedProfesor.nombre} ${selectedProfesor.apellidos}`,
           tarea_pac: tareaPAC || 'Tareas de la materia y reflexión conductual',
           reincorporacion: reincorporacionAula,
         } : undefined,
@@ -425,19 +455,80 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
           </p>
         </div>
 
-        {/* Datos automáticos del docente */}
+        {/* Datos automáticos del docente o selector para Admin */}
         <div className="bg-sky-50/70 border border-sky-100 rounded-xl px-3 py-2 text-right">
-          <div className="text-[10px] text-slate-500 uppercase font-mono">Profesor/a Actuante</div>
-          <div className="text-xs font-bold text-slate-800 truncate max-w-[200px]">
-            {currentUser.nombre} {currentUser.apellidos}
+          <div className="text-[10px] text-slate-500 uppercase font-mono">Profesor/a Informante</div>
+          <div className="text-xs font-bold text-slate-800 truncate max-w-[220px]">
+            {selectedProfesor.nombre} {selectedProfesor.apellidos}
           </div>
-          <div className="text-[10px] text-sky-700 font-mono truncate max-w-[200px]">
-            {materia}
+          <div className="text-[10px] text-sky-700 font-mono truncate max-w-[220px]">
+            {materia} {isAdmin && selectedProfesor.id_profesor !== currentUser.id_profesor ? '· (Por Convivencia)' : ''}
           </div>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* SELECCIÓN DE PROFESOR/A PARA ADMINISTRACIÓN / CONVIVENCIA */}
+        {isAdmin && (
+          <div className="p-3.5 bg-gradient-to-r from-sky-50 via-indigo-50/40 to-blue-50 border border-sky-200 rounded-2xl space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <label className="text-xs font-bold text-sky-950 flex items-center gap-1.5">
+                <User className="w-4 h-4 text-sky-700" />
+                <span>Profesor/a que informa o puso el parte:</span>
+              </label>
+              <span className="text-[11px] text-sky-800 font-medium">
+                {selectedProfesor.id_profesor === currentUser.id_profesor 
+                  ? 'Registrando en mi propio nombre' 
+                  : `Registrando en nombre de ${selectedProfesor.nombre} ${selectedProfesor.apellidos}`}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <select
+                  value={selectedProfesorId}
+                  onChange={(e) => handleProfesorChange(e.target.value)}
+                  className="w-full text-xs font-semibold rounded-xl border border-sky-300 bg-white p-2.5 text-slate-800 focus:ring-2 focus:ring-sky-500 shadow-2xs"
+                >
+                  <option value={currentUser.id_profesor}>
+                    👤 Yo mismo ({currentUser.nombre} {currentUser.apellidos})
+                  </option>
+                  <optgroup label="Claustro de Profesores">
+                    {listaProfesoresOrdenada
+                      .filter(p => p.id_profesor !== currentUser.id_profesor)
+                      .map(p => (
+                        <option key={p.id_profesor} value={p.id_profesor}>
+                          {p.apellidos}, {p.nombre} — {p.departamento} {p.tutor_de_grupo ? `(Tutor ${p.tutor_de_grupo})` : ''}
+                        </option>
+                      ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-white/90 border border-sky-200 rounded-xl px-3 py-1.5 text-slate-700">
+                  <div className="text-[10px] text-slate-400 font-mono">Materia / Depto. Asociado</div>
+                  <div className="font-bold text-sky-900 truncate text-xs">{materia || 'General'}</div>
+                </div>
+                {selectedProfesor.tutor_de_grupo && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedProfesor.tutor_de_grupo) {
+                        setSelectedGrupo(selectedProfesor.tutor_de_grupo as GrupoEducativo);
+                      }
+                    }}
+                    className="text-[11px] bg-sky-100 hover:bg-sky-200 text-sky-800 font-semibold px-2.5 py-2 rounded-xl border border-sky-300 transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+                    title="Cargar grupo de su tutoría"
+                  >
+                    Cargar grupo {selectedProfesor.tutor_de_grupo}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* PASO 1: SELECCIÓN DE ALUMNO/A Y GRUPO */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">

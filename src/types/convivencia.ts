@@ -299,7 +299,7 @@ export interface AuditLog {
   id_log: string;
   timestamp: string;
   usuario_email: string;
-  accion: 'CREAR_PARTE' | 'ACTUALIZAR_TRAMITACION' | 'COMPENSAR_PUNTOS' | 'RECEPCION_PAC' | 'IMPORTACION_MASIVA' | 'ACTUALIZACION_SISTEMA' | 'ELIMINAR_PARTE';
+  accion: 'CREAR_PARTE' | 'MODIFICAR_PARTE' | 'ACTUALIZAR_TRAMITACION' | 'COMPENSAR_PUNTOS' | 'RECEPCION_PAC' | 'IMPORTACION_MASIVA' | 'ACTUALIZACION_SISTEMA' | 'ELIMINAR_PARTE';
   entidad: string;
   detalles: string;
   hash_integridad: string;
