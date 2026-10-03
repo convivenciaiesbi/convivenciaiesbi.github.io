@@ -1283,9 +1283,106 @@ export class StorageService {
   }
 
   /**
+   * Obtiene todas las sanciones activas (excluyendo las eliminadas / anuladas).
+   */
+  static getActiveSanciones(): Sancion[] {
+    const deletedSancionIds = new Set(this.getDeletedSancionIds());
+    return this.getSanciones().filter((s: Sancion) => s && s.id_sancion && !deletedSancionIds.has(s.id_sancion));
+  }
+
+  /**
+   * Calcula el saldo de carnet de un alumno de forma determinista y en tiempo real:
+   * Saldo = 10 - Suma(puntos restados en sanciones activas no eliminadas) + Suma(puntos recuperados en compensaciones)
+   * Acotado estrictamente entre 0 y 10.
+   */
+  static calcularSaldoAlumno(idAlumno: string): {
+    saldoActual: number;
+    totalPuntosPerdidos: number;
+    totalPuntosRecuperados: number;
+    countSanciones: number;
+    estado: Alumno['estado'];
+  } {
+    const cleanAlumnoId = (idAlumno || '').toLowerCase().trim();
+    const activeSanciones: Sancion[] = this.getActiveSanciones();
+    const movimientos = this.getMovimientos();
+
+    const sancionesAlumno = activeSanciones.filter((s: Sancion) => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId);
+    const totalPuntosPerdidos = sancionesAlumno.reduce((acc: number, s: Sancion) => acc + (Math.max(0, s.puntos_restados || 0)), 0);
+
+    const movsAlumno = movimientos.filter(m => 
+      (m.id_alumno || '').toLowerCase().trim() === cleanAlumnoId && 
+      (m.tipo === 'MEDIDA_RESTAURATIVA' || m.tipo === 'RECUPERACION_SEMANAL')
+    );
+    const totalPuntosRecuperados = movsAlumno.reduce((acc: number, m) => acc + (Math.max(0, m.puntos || 0)), 0);
+
+    const saldoCalculado = Math.max(0, Math.min(10, 10 - totalPuntosPerdidos + totalPuntosRecuperados));
+    const countSanciones = sancionesAlumno.length;
+
+    let estado: Alumno['estado'] = 'ACTIVO';
+    if (saldoCalculado === 0) {
+      estado = 'SALDO_CERO';
+    } else if (saldoCalculado <= 3) {
+      estado = 'ALERTA_PUNTOS';
+    }
+
+    return {
+      saldoActual: saldoCalculado,
+      totalPuntosPerdidos,
+      totalPuntosRecuperados,
+      countSanciones,
+      estado,
+    };
+  }
+
+  /**
+   * Calcula los saldos anterior y resultante cronológicos exactos para un parte histórico.
+   */
+  static calcularSaldoHistoricoSancion(idSancion: string): { saldoAnterior: number; saldoResultante: number } {
+    const sanciones: Sancion[] = this.getActiveSanciones();
+    const sancionTarget = sanciones.find((s: Sancion) => s.id_sancion === idSancion);
+    if (!sancionTarget) {
+      return { saldoAnterior: 10, saldoResultante: 10 };
+    }
+
+    if (sancionTarget.saldo_anterior !== undefined && sancionTarget.saldo_resultante !== undefined) {
+      return {
+        saldoAnterior: sancionTarget.saldo_anterior,
+        saldoResultante: sancionTarget.saldo_resultante,
+      };
+    }
+
+    // Calcular cronológicamente todas las sanciones de este alumno hasta este parte
+    const cleanAlumnoId = (sancionTarget.id_alumno || '').toLowerCase().trim();
+    const sancionesAlumno = sanciones
+      .filter((s: Sancion) => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId)
+      .sort((a: Sancion, b: Sancion) => {
+        const timeA = new Date(`${a.fecha}T${a.hora_incidente || '08:00'}:00`).getTime();
+        const timeB = new Date(`${b.fecha}T${b.hora_incidente || '08:00'}:00`).getTime();
+        return timeA - timeB;
+      });
+
+    let acumulador = 10;
+    let targetSaldoAnt = 10;
+    let targetSaldoRes = 10;
+
+    for (const s of sancionesAlumno) {
+      const prev = acumulador;
+      const desc = Math.max(0, s.puntos_restados || 0);
+      acumulador = Math.max(0, acumulador - desc);
+      if (s.id_sancion === idSancion) {
+        targetSaldoAnt = prev;
+        targetSaldoRes = acumulador;
+        break;
+      }
+    }
+
+    return { saldoAnterior: targetSaldoAnt, saldoResultante: targetSaldoRes };
+  }
+
+  /**
    * REQUISITOS FUNCIONALES V0 - SECCIÓN 1, 2, 7 & 9
    * - Cada conducta tiene puntuación fija (o manual en GRA-SALUD).
-   * - P_nuevo = max(0, P_actual - puntos_descontados).
+   * - Descuenta puntos en el Carnet de Convivencia con cálculo estricto en tiempo real.
    * - La app NO decide expulsiones:
    *   * Si P_nuevo == 0 -> 'SALDO_CERO' (alerta a Jefatura/Convivencia para su valoración).
    *   * Si P_nuevo <= 3 -> 'ALERTA_PUNTOS'.
@@ -1297,36 +1394,32 @@ export class StorageService {
     usuarioEmail: string
   ): { sancion: Sancion; alumnoActualizado: Alumno; saldoCero: boolean; alertaGrave: boolean } {
     const alumnos = this.getAlumnos();
-    const alumnoIndex = alumnos.findIndex(a => a.id_alumno === sancionData.id_alumno);
+    const alumnoIndex = alumnos.findIndex(a => (a.id_alumno || '').toLowerCase().trim() === (sancionData.id_alumno || '').toLowerCase().trim());
     if (alumnoIndex === -1) {
       throw new Error(`Alumno no encontrado con ID: ${sancionData.id_alumno}`);
     }
 
     const alumno = alumnos[alumnoIndex];
-    const puntosPrevios = alumno.puntos_actuales;
+    
+    // 1. Obtener el saldo real previo del alumno en tiempo real considerando sus sanciones activas
+    const balancePrevio = this.calcularSaldoAlumno(alumno.id_alumno);
+    const puntosPrevios = balancePrevio.saldoActual;
     const puntosDescontar = Math.max(0, sancionData.puntos_restados);
-    const nuevosPuntos = Math.max(0, puntosPrevios - puntosDescontar);
+    const nuevosPuntos = Math.max(0, Math.min(10, puntosPrevios - puntosDescontar));
 
     let nuevoEstado: Alumno['estado'] = alumno.estado;
     const saldoCero = nuevosPuntos === 0;
     const alertaGrave = sancionData.tipo_conducta === 'GRAVE' || puntosDescontar >= 5;
 
-    if (nuevosPuntos === 0) {
-      nuevoEstado = 'SALDO_CERO';
-    } else if (nuevosPuntos <= 3) {
-      nuevoEstado = 'ALERTA_PUNTOS';
-    } else {
-      nuevoEstado = 'ACTIVO';
+    if (alumno.estado !== 'BAJA') {
+      if (nuevosPuntos === 0) {
+        nuevoEstado = 'SALDO_CERO';
+      } else if (nuevosPuntos <= 3) {
+        nuevoEstado = 'ALERTA_PUNTOS';
+      } else {
+        nuevoEstado = 'ACTIVO';
+      }
     }
-
-    const alumnoActualizado: Alumno = {
-      ...alumno,
-      puntos_actuales: nuevosPuntos,
-      estado: nuevoEstado,
-      historial_sanciones_count: (alumno.historial_sanciones_count || 0) + 1,
-    };
-    alumnos[alumnoIndex] = alumnoActualizado;
-    this.saveAlumnos(alumnos);
 
     const year = new Date().getFullYear();
     const expedienteNum = `${year}/${String(Math.floor(Math.random() * 900) + 100)}-BI`;
@@ -1352,7 +1445,12 @@ export class StorageService {
 
     // Recalcular saldo exacto del alumno tras asentar la sanción
     const alumnosActualizados = this.recalcularPuntosAlumnos(alumno.id_alumno);
-    const alumnoFinal = alumnosActualizados.find(a => a.id_alumno === alumno.id_alumno) || alumnoActualizado;
+    const alumnoFinal = alumnosActualizados.find(a => a.id_alumno === alumno.id_alumno) || {
+      ...alumno,
+      puntos_actuales: nuevosPuntos,
+      estado: nuevoEstado,
+      historial_sanciones_count: (alumno.historial_sanciones_count || 0) + 1,
+    };
 
     // Registra movimiento en el histórico de puntos (V0 - Sección 1)
     this.registrarMovimiento({

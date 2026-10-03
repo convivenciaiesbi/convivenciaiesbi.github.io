@@ -202,14 +202,18 @@ export async function generateOfficialSancionPdf(
     doc.text(alumno.nie || 'Sin NIE', marginX + 54, curY + 15);
 
     doc.setFont('helvetica', 'normal');
-    doc.text('Representante Legal:', marginX + 3, curY + 20);
+    doc.text('Carnet Puntos:', marginX + 3, curY + 20);
     doc.setFont('helvetica', 'bold');
-    doc.text(alumno.nombre_tutor || 'Padre/Madre/Tutor Legal', marginX + 33, curY + 20);
+    const colorCarnet = alumno.puntos_actuales === 0 ? [225, 29, 72] : alumno.puntos_actuales <= 3 ? [217, 119, 6] : [3, 105, 161];
+    doc.setTextColor(colorCarnet[0], colorCarnet[1], colorCarnet[2]);
+    doc.text(`${alumno.puntos_actuales} / 10 pts (${alumno.estado === 'SALDO_CERO' ? 'Saldo Cero' : alumno.estado === 'ALERTA_PUNTOS' ? 'Alerta Puntos' : 'Activo'})`, marginX + 24, curY + 20);
 
+    doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'normal');
-    doc.text('Teléfono de Contacto:', marginX + 3, curY + 25);
+    doc.text('Tutor Legal / Tel.:', marginX + 3, curY + 25);
     doc.setFont('helvetica', 'bold');
-    doc.text(alumno.telefono_tutor || 'No registrado', marginX + 33, curY + 25);
+    const tutorTexto = `${alumno.nombre_tutor || 'Tutor Legal'} (${alumno.telefono_tutor || 'No registrado'})`;
+    doc.text(tutorTexto.length > 32 ? tutorTexto.substring(0, 30) + '...' : tutorTexto, marginX + 26, curY + 25);
 
     // Box Right: Profesor / Hecho
     const rightColX = marginX + colWidth + 4;

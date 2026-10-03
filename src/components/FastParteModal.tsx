@@ -45,6 +45,7 @@ import {
   esGrupoInformatica
 } from '../data/rofCatalog';
 import { AuthService } from '../services/authService';
+import { StorageService } from '../services/storageService';
 
 interface FastParteModalProps {
   alumnos: Alumno[];
@@ -199,8 +200,16 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
     return calcularPuntosInfraccion(selectedConductaCodigo, grp, manualPuntosSalud);
   }, [selectedConductaCodigo, selectedAlumno, selectedGrupo, manualPuntosSalud]);
 
-  // Puntos resultantes
-  const puntosActuales = selectedAlumno ? selectedAlumno.puntos_actuales : 10;
+  // Puntos actuales del alumno (calculados en tiempo real con todas las sanciones activas)
+  const puntosActuales = useMemo(() => {
+    if (!selectedAlumno) return 10;
+    try {
+      return StorageService.calcularSaldoAlumno(selectedAlumno.id_alumno).saldoActual;
+    } catch {
+      return selectedAlumno.puntos_actuales ?? 10;
+    }
+  }, [selectedAlumno, alumnos]);
+
   const puntosResultantes = Math.max(0, puntosActuales - puntosDescuento);
 
   // Selección de tipo de conducta
