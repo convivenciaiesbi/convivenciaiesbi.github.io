@@ -251,8 +251,11 @@ export async function generateOfficialSancionPdf(
 
     // --- 3. Section: Tipificación Normativa y Calificación de la Conducta (V0 - Sección 6) ---
     const tipif = obtenerTipificacionNormativa(sancion.codigo_infraccion);
-    const saldoAnt = sancion.saldo_anterior !== undefined ? sancion.saldo_anterior : Math.min(10, alumno.puntos_actuales + sancion.puntos_restados);
-    const saldoRes = sancion.saldo_resultante !== undefined ? sancion.saldo_resultante : alumno.puntos_actuales;
+    const puntosDeducidos = Math.max(0, sancion.puntos_restados || 0);
+    const saldoAnt = sancion.saldo_anterior !== undefined 
+      ? sancion.saldo_anterior 
+      : Math.min(10, (alumno.puntos_actuales || 10) + puntosDeducidos);
+    const saldoRes = Math.max(0, saldoAnt - puntosDeducidos);
 
     doc.setFillColor(254, 242, 242); // rose-50
     doc.setDrawColor(254, 202, 202); // rose-200
@@ -282,19 +285,19 @@ export async function generateOfficialSancionPdf(
     doc.setTextColor(190, 18, 60);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
-    const puntosTexto = sancion.puntos_restados > 0 
-      ? `Pérdida asociada: -${sancion.puntos_restados} pts` 
+    const puntosTexto = puntosDeducidos > 0 
+      ? `Deducción en este parte: -${puntosDeducidos} pts` 
       : 'Incidencia académica: 0 pts';
     doc.text(puntosTexto, marginX + 4, curY + 22.5);
 
     doc.setTextColor(51, 65, 85);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Saldo anterior: ${saldoAnt} / 10 pts`, marginX + 70, curY + 22.5);
+    doc.text(`Saldo previo: ${saldoAnt} / 10 pts`, marginX + 70, curY + 22.5);
 
     doc.setFont('helvetica', 'bold');
     const colorRes = saldoRes === 0 ? [225, 29, 72] : saldoRes <= 3 ? [217, 119, 6] : [3, 105, 161];
     doc.setTextColor(colorRes[0], colorRes[1], colorRes[2]);
-    doc.text(`Saldo resultante: ${saldoRes} / 10 pts`, pageWidth - marginX - 5, curY + 22.5, { align: 'right' });
+    doc.text(`Saldo tras este parte: ${saldoRes} / 10 pts`, pageWidth - marginX - 5, curY + 22.5, { align: 'right' });
 
     curY += 29;
 

@@ -300,7 +300,7 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                       <span>NIE: <strong>{currentAlumno.nie}</strong></span>
                     </div>
                     <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200">
-                      <span className="text-slate-500 font-medium">Carnet de Convivencia:</span>
+                      <span className="text-slate-500 font-medium">Saldo global hoy:</span>
                       <span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[10px] ${
                         currentAlumno.puntos_actuales === 0
                           ? 'bg-rose-100 text-rose-800'
@@ -335,8 +335,11 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                 {/* 2. Calificación de la Conducta e Impacto en Carnet de 10 Puntos (V0) */}
                 {(() => {
                   const tipif = obtenerTipificacionNormativa(currentSancion.codigo_infraccion);
-                  const saldoAnt = currentSancion.saldo_anterior !== undefined ? currentSancion.saldo_anterior : Math.min(10, currentAlumno.puntos_actuales + currentSancion.puntos_restados);
-                  const saldoRes = currentSancion.saldo_resultante !== undefined ? currentSancion.saldo_resultante : currentAlumno.puntos_actuales;
+                  const puntosDeducidos = Math.max(0, currentSancion.puntos_restados || 0);
+                  const saldoAnt = currentSancion.saldo_anterior !== undefined 
+                    ? currentSancion.saldo_anterior 
+                    : Math.min(10, currentAlumno.puntos_actuales + puntosDeducidos);
+                  const saldoRes = Math.max(0, saldoAnt - puntosDeducidos);
 
                   return (
                     <div className="border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
@@ -361,12 +364,12 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
 
                       <div className="bg-slate-100 p-2.5 rounded-lg font-mono text-xs flex justify-between items-center">
                         <div>
-                          Pérdida asociada: <strong className={currentSancion.puntos_restados > 0 ? 'text-rose-700' : 'text-slate-700'}>
-                            {currentSancion.puntos_restados > 0 ? `-${currentSancion.puntos_restados} puntos` : '0 puntos (Incidencia académica)'}
+                          Deducción en este parte: <strong className={puntosDeducidos > 0 ? 'text-rose-700' : 'text-slate-700'}>
+                            {puntosDeducidos > 0 ? `-${puntosDeducidos} puntos` : '0 puntos (Incidencia académica)'}
                           </strong>
                         </div>
                         <div>
-                          Saldo: {saldoAnt} → <strong className={saldoRes <= 3 ? 'text-rose-700' : 'text-sky-800'}>{saldoRes} / 10 puntos</strong>
+                          Evolución en este parte: {saldoAnt} → <strong className={saldoRes <= 3 ? 'text-rose-700' : 'text-sky-800'}>{saldoRes} / 10 pts</strong>
                         </div>
                       </div>
                     </div>
