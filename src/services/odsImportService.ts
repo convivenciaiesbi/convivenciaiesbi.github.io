@@ -113,7 +113,7 @@ export function normalizarGrupoEducativo(raw: string): GrupoEducativo {
     return clean.includes('2') ? '2_CALOR' : '1_CALOR';
   }
   if (clean.includes('FPB') || clean.includes('BASICA') || clean.includes('PROFESIONAL_BASICA')) {
-    return clean.includes('2') ? '2FPB' : '1FPB';
+    return clean.includes('2') ? '2_INF' : '1_INF';
   }
 
   // E.S.O.

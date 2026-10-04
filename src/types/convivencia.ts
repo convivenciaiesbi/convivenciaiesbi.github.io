@@ -54,8 +54,8 @@ export const LISTA_GRUPOS_OFICIALES: InfoGrupoDetallada[] = [
   // Ciclos Formativos
   { codigo: '1_FRIO', etiqueta: '1º FRÍO', etapa: 'CICLOS', descripcion: '1º Ciclo Formativo Instalaciones Frigoríficas y Climatización' },
   { codigo: '2_FRIO', etiqueta: '2º FRÍO', etapa: 'CICLOS', descripcion: '2º Ciclo Formativo Instalaciones Frigoríficas y Climatización' },
-  { codigo: '1_INF', etiqueta: '1º INF', etapa: 'CICLOS', descripcion: '1º Ciclo Formativo Informática' },
-  { codigo: '2_INF', etiqueta: '2º INF', etapa: 'CICLOS', descripcion: '2º Ciclo Formativo Informática' },
+  { codigo: '1_INF', etiqueta: '1º INF (FP Básica)', etapa: 'FPB', descripcion: '1º FP Básica Informática (1º INF)' },
+  { codigo: '2_INF', etiqueta: '2º INF (FP Básica)', etapa: 'FPB', descripcion: '2º FP Básica Informática (2º INF)' },
   { codigo: '1_CALOR', etiqueta: '1º CALOR', etapa: 'CICLOS', descripcion: '1º Ciclo Formativo Instalaciones de Producción de Calor' },
   { codigo: '2_CALOR', etiqueta: '2º CALOR', etapa: 'CICLOS', descripcion: '2º Ciclo Formativo Instalaciones de Producción de Calor' },
 

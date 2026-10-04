@@ -29,7 +29,7 @@ import {
   Trash2,
   Pencil
 } from 'lucide-react';
-import { Sancion, Alumno, Profesor, EstadoTramitacion, CodigoInfraccionROF } from '../types/convivencia';
+import { Sancion, Alumno, Profesor, EstadoTramitacion, CodigoInfraccionROF, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
 import { MATRIZ_ROF_CATALOG } from '../data/rofCatalog';
 import { AuthService } from '../services/authService';
 import { EditarParteModal } from './EditarParteModal';
@@ -445,13 +445,11 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
             className="bg-slate-100 border border-slate-200 text-slate-800 px-2.5 py-1.5 rounded-lg focus:outline-none text-xs cursor-pointer"
           >
             <option value="TODOS">Todos los Grupos</option>
-            <option value="1ESO_A">1º ESO A</option>
-            <option value="1ESO_B">1º ESO B</option>
-            <option value="2ESO_A">2º ESO A</option>
-            <option value="2ESO_B">2º ESO B</option>
-            <option value="3ESO_A">3º ESO A</option>
-            <option value="4ESO_A">4º ESO A</option>
-            <option value="1FPB">1º FP Básica</option>
+            {LISTA_GRUPOS_OFICIALES.map(g => (
+              <option key={g.codigo} value={g.codigo}>
+                {g.etiqueta}
+              </option>
+            ))}
           </select>
 
           {/* State Filter */}

@@ -346,31 +346,63 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   // Breakdown by Educational Level (Cursos)
   const nivelBreakdown = useMemo(() => {
-    const levels = ['1º ESO', '2º ESO', '3º ESO', '4º ESO', 'FP Básica'];
-    const countsA: Record<string, number> = { '1º ESO': 0, '2º ESO': 0, '3º ESO': 0, '4º ESO': 0, 'FP Básica': 0 };
-    const countsB: Record<string, number> = { '1º ESO': 0, '2º ESO': 0, '3º ESO': 0, '4º ESO': 0, 'FP Básica': 0 };
+    const baseLevels = [
+      '1º ESO',
+      '2º ESO',
+      '3º ESO',
+      '4º ESO',
+      'FP Básica (1º y 2º INF)',
+      '1º Bachillerato',
+      '2º Bachillerato',
+      'Ciclos (Frío / Calor)'
+    ];
+    const countsA: Record<string, number> = {};
+    const countsB: Record<string, number> = {};
+    baseLevels.forEach(l => {
+      countsA[l] = 0;
+      countsB[l] = 0;
+    });
+
+    const classifyGroupToLevel = (rawGrp: string): string | null => {
+      const grp = (rawGrp || '').trim().toUpperCase();
+      if (grp.startsWith('1ESO') || grp.startsWith('1º ESO') || grp.startsWith('1-ESO') || grp.startsWith('1 ESO')) return '1º ESO';
+      if (grp.startsWith('2ESO') || grp.startsWith('2º ESO') || grp.startsWith('2-ESO') || grp.startsWith('2 ESO')) return '2º ESO';
+      if (grp.startsWith('3ESO') || grp.startsWith('3º ESO') || grp.startsWith('3-ESO') || grp.startsWith('3 ESO')) return '3º ESO';
+      if (grp.startsWith('4ESO') || grp.startsWith('4º ESO') || grp.startsWith('4-ESO') || grp.startsWith('4 ESO')) return '4º ESO';
+      if (
+        grp === '1_INF' ||
+        grp === '2_INF' ||
+        grp.includes('INF') ||
+        grp.includes('FPB') ||
+        grp.includes('BASICA')
+      ) {
+        return 'FP Básica (1º y 2º INF)';
+      }
+      if (grp.startsWith('1BACH') || grp.startsWith('1º BACH') || grp.startsWith('1-BACH') || grp.startsWith('1 BACH')) return '1º Bachillerato';
+      if (grp.startsWith('2BACH') || grp.startsWith('2º BACH') || grp.startsWith('2-BACH') || grp.startsWith('2 BACH')) return '2º Bachillerato';
+      if (grp.includes('FRIO') || grp.includes('CALOR')) return 'Ciclos (Frío / Calor)';
+      return null;
+    };
 
     datasetYearA.forEach(s => {
       const alm = alumnoMap.get(s.id_alumno);
       const grp = alm ? alm.grupo : '';
-      if (grp.startsWith('1ESO')) countsA['1º ESO']++;
-      else if (grp.startsWith('2ESO')) countsA['2º ESO']++;
-      else if (grp.startsWith('3ESO')) countsA['3º ESO']++;
-      else if (grp.startsWith('4ESO')) countsA['4º ESO']++;
-      else if (grp.includes('FPB')) countsA['FP Básica']++;
+      const lvl = classifyGroupToLevel(grp);
+      if (lvl) countsA[lvl]++;
     });
 
     datasetYearB.forEach(s => {
       const alm = alumnoMap.get(s.id_alumno);
       const grp = alm ? alm.grupo : '';
-      if (grp.startsWith('1ESO')) countsB['1º ESO']++;
-      else if (grp.startsWith('2ESO')) countsB['2º ESO']++;
-      else if (grp.startsWith('3ESO')) countsB['3º ESO']++;
-      else if (grp.startsWith('4ESO')) countsB['4º ESO']++;
-      else if (grp.includes('FPB')) countsB['FP Básica']++;
+      const lvl = classifyGroupToLevel(grp);
+      if (lvl) countsB[lvl]++;
     });
 
-    return levels.map(lvl => ({
+    // Mostrar siempre 1º-4º ESO y FP Básica (1º y 2º INF), y además Bachillerato/Ciclos si tienen partes registrados
+    const coreSet = new Set(['1º ESO', '2º ESO', '3º ESO', '4º ESO', 'FP Básica (1º y 2º INF)']);
+    const visibleLevels = baseLevels.filter(lvl => coreSet.has(lvl) || countsA[lvl] > 0 || countsB[lvl] > 0);
+
+    return visibleLevels.map(lvl => ({
       nivel: lvl,
       countA: countsA[lvl],
       pctA: statsA.totalPartes > 0 ? Math.round((countsA[lvl] / statsA.totalPartes) * 100) : 0,
@@ -405,20 +437,44 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       if (g.startsWith('4ESO') || g.startsWith('4º ESO') || g.startsWith('4-ESO') || g.startsWith('4 ESO')) {
         return { cursoKey: '4º ESO', cursoLabel: '4º de E.S.O.', grupoName: g };
       }
-      if (g.startsWith('1FPB') || g.startsWith('1º FPB') || g.startsWith('1 FPB')) {
-        return { cursoKey: '1º FPB', cursoLabel: '1º Formación Profesional Básica', grupoName: g };
+      if (
+        g === '1_INF' ||
+        g.startsWith('1_INF') ||
+        g.startsWith('1º INF') ||
+        g.startsWith('1 INF') ||
+        g.startsWith('1INF') ||
+        g.startsWith('1FPB') ||
+        g.startsWith('1º FPB') ||
+        g.startsWith('1 FPB')
+      ) {
+        return { cursoKey: '1º INF (FP Básica)', cursoLabel: '1º FP Básica Informática (1º INF)', grupoName: g };
       }
-      if (g.startsWith('2FPB') || g.startsWith('2º FPB') || g.startsWith('2 FPB')) {
-        return { cursoKey: '2º FPB', cursoLabel: '2º Formación Profesional Básica', grupoName: g };
+      if (
+        g === '2_INF' ||
+        g.startsWith('2_INF') ||
+        g.startsWith('2º INF') ||
+        g.startsWith('2 INF') ||
+        g.startsWith('2INF') ||
+        g.startsWith('2FPB') ||
+        g.startsWith('2º FPB') ||
+        g.startsWith('2 FPB')
+      ) {
+        return { cursoKey: '2º INF (FP Básica)', cursoLabel: '2º FP Básica Informática (2º INF)', grupoName: g };
       }
-      if (g.includes('FPB')) {
-        return { cursoKey: 'FP Básica', cursoLabel: 'FP Básica (Otros)', grupoName: g };
+      if (g.includes('INF') || g.includes('FPB')) {
+        return { cursoKey: 'FP Básica (INF)', cursoLabel: 'FP Básica Informática (1º / 2º INF)', grupoName: g };
       }
       if (g.startsWith('1BACH') || g.startsWith('1º BACH') || g.startsWith('1-BACH')) {
         return { cursoKey: '1º Bachillerato', cursoLabel: '1º de Bachillerato', grupoName: g };
       }
       if (g.startsWith('2BACH') || g.startsWith('2º BACH') || g.startsWith('2-BACH')) {
         return { cursoKey: '2º Bachillerato', cursoLabel: '2º de Bachillerato', grupoName: g };
+      }
+      if (g.includes('FRIO')) {
+        return { cursoKey: g.startsWith('2') ? '2º Frío' : '1º Frío', cursoLabel: `${g.startsWith('2') ? '2º' : '1º'} Ciclo Frío y Climatización`, grupoName: g };
+      }
+      if (g.includes('CALOR')) {
+        return { cursoKey: g.startsWith('2') ? '2º Calor' : '1º Calor', cursoLabel: `${g.startsWith('2') ? '2º' : '1º'} Ciclo Producción de Calor`, grupoName: g };
       }
       return { cursoKey: g || 'Otros', cursoLabel: g || 'Otros Grupos', grupoName: g || 'Sin grupo' };
     };

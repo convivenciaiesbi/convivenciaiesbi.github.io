@@ -994,24 +994,25 @@ export async function generateMemoriaConvivenciaPdf(
     { nivel: '2º ESO', count: 0, pct: 0 },
     { nivel: '3º ESO', count: 0, pct: 0 },
     { nivel: '4º ESO', count: 0, pct: 0 },
-    { nivel: 'FP Básica', count: 0, pct: 0 },
+    { nivel: 'FP Básica (1º y 2º INF)', count: 0, pct: 0 },
   ];
 
   const maxNivel = Math.max(1, ...niveles.map(n => n.count));
   niveles.slice(0, 5).forEach(n => {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
+    doc.setFontSize(6.2);
     doc.setTextColor(51, 65, 85);
-    doc.text(n.nivel, marginX + 3, nY + 3.5);
+    const shortNivel = n.nivel.includes('FP Básica') ? 'FP Básica (INF)' : n.nivel;
+    doc.text(shortNivel, marginX + 2.5, nY + 3.5);
 
     // Track
     doc.setFillColor(226, 232, 240);
-    doc.roundedRect(marginX + 22, nY + 0.8, halfW - 40, 3.5, 0.5, 0.5, 'F');
+    doc.roundedRect(marginX + 24, nY + 0.8, halfW - 42, 3.5, 0.5, 0.5, 'F');
 
     // Fill
     doc.setFillColor(3, 105, 161);
-    const bW = (halfW - 40) * (n.count / maxNivel);
-    doc.roundedRect(marginX + 22, nY + 0.8, Math.max(1, bW), 3.5, 0.5, 0.5, 'F');
+    const bW = (halfW - 42) * (n.count / maxNivel);
+    doc.roundedRect(marginX + 24, nY + 0.8, Math.max(1, bW), 3.5, 0.5, 0.5, 'F');
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
