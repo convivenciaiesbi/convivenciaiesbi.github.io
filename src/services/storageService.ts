@@ -1056,6 +1056,42 @@ export class StorageService {
     };
   }
 
+  static deduplicarSancionesPorExpediente(lista: Sancion[]): Sancion[] {
+    const byExpAndStudent = new Map<string, Sancion>();
+    lista.forEach(s => {
+      if (!s || !s.id_sancion) return;
+      let th = s.tramo_horario;
+      if ((th as string) === '1ª Hora (08:15 - 09:15)') th = '1ª Hora (08:30 - 09:30)';
+      else if ((th as string) === '2ª Hora (09:15 - 10:15)') th = '2ª Hora (09:30 - 10:30)';
+      else if ((th as string) === '3ª Hora (10:15 - 11:15)') th = '3ª Hora (10:30 - 11:30)';
+      else if ((th as string) === 'Recreo (11:15 - 11:45)') th = 'Recreo (11:30 - 12:00)';
+      else if ((th as string) === '4ª Hora (11:45 - 12:45)') th = '4ª Hora (12:00 - 13:00)';
+      else if ((th as string) === '5ª Hora (12:45 - 13:45)') th = '5ª Hora (13:00 - 14:00)';
+      else if ((th as string) === '6ª Hora (13:45 - 14:45)') th = '6ª Hora (14:00 - 15:00)';
+
+      const normalized: Sancion = { ...s, tramo_horario: th };
+      const key = `${(normalized.numero_expediente || normalized.id_sancion).trim()}|${normalized.id_alumno}`;
+      const existing = byExpAndStudent.get(key);
+      if (!existing) {
+        byExpAndStudent.set(key, normalized);
+      } else {
+        const isSynthetic = (item: Sancion) =>
+          item.id_sancion.startsWith('snc-rec-') ||
+          item.id_sancion.startsWith('snc-v2-') ||
+          (item.descripcion_hechos || '').startsWith('Incidencia registrada según tipificación ROF');
+        if (isSynthetic(existing) && !isSynthetic(normalized)) {
+          byExpAndStudent.set(key, normalized);
+        }
+      }
+    });
+
+    return Array.from(byExpAndStudent.values()).sort((a, b) => {
+      const timeA = new Date(a.timestamp || `${a.fecha || ''}T${a.hora_incidente || '08:00'}:00`).getTime() || 0;
+      const timeB = new Date(b.timestamp || `${b.fecha || ''}T${b.hora_incidente || '08:00'}:00`).getTime() || 0;
+      return timeB - timeA;
+    });
+  }
+
   static getSanciones(): Sancion[] {
     const raw = localStorage.getItem(KEY_SANCIONES);
     if (!raw) {
@@ -1064,30 +1100,15 @@ export class StorageService {
     }
     try {
       const parsed: Sancion[] = JSON.parse(raw);
-      // Migración de etiquetas horarias si existían con el horario previo
-      const mapped = parsed.filter(s => s && s.id_sancion).map(s => {
-        let th = s.tramo_horario;
-        if ((th as string) === '1ª Hora (08:15 - 09:15)') th = '1ª Hora (08:30 - 09:30)';
-        else if ((th as string) === '2ª Hora (09:15 - 10:15)') th = '2ª Hora (09:30 - 10:30)';
-        else if ((th as string) === '3ª Hora (10:15 - 11:15)') th = '3ª Hora (10:30 - 11:30)';
-        else if ((th as string) === 'Recreo (11:15 - 11:45)') th = 'Recreo (11:30 - 12:00)';
-        else if ((th as string) === '4ª Hora (11:45 - 12:45)') th = '4ª Hora (12:00 - 13:00)';
-        else if ((th as string) === '5ª Hora (12:45 - 13:45)') th = '5ª Hora (13:00 - 14:00)';
-        else if ((th as string) === '6ª Hora (13:45 - 14:45)') th = '6ª Hora (14:00 - 15:00)';
-        return { ...s, tramo_horario: th };
-      });
-      return mapped.sort((a, b) => {
-        const timeA = new Date(a.timestamp || `${a.fecha || ''}T${a.hora_incidente || '08:00'}:00`).getTime() || 0;
-        const timeB = new Date(b.timestamp || `${b.fecha || ''}T${b.hora_incidente || '08:00'}:00`).getTime() || 0;
-        return timeB - timeA;
-      });
+      return this.deduplicarSancionesPorExpediente(parsed);
     } catch {
       return SANCIONES_INICIALES;
     }
   }
 
   static saveSanciones(sanciones: Sancion[]): void {
-    localStorage.setItem(KEY_SANCIONES, JSON.stringify(sanciones));
+    const deduped = this.deduplicarSancionesPorExpediente(sanciones);
+    localStorage.setItem(KEY_SANCIONES, JSON.stringify(deduped));
     this.touchLocalWriteTimestamp();
   }
 
@@ -1284,6 +1305,172 @@ export class StorageService {
     movs.unshift(newMov);
     this.saveMovimientos(movs);
     return newMov;
+  }
+
+  /**
+   * Reconstruye automáticamente partes activos desde el registro inmutable de auditoría (audit_logs)
+   * si en algún momento fueron purgados por error de la lista sanciones sin haber tenido acción ELIMINAR_PARTE.
+   */
+  static reconstruirPartesDesdeAuditoria(
+    auditLogs: AuditLog[],
+    alumnos: Alumno[],
+    profesores: Profesor[],
+    existingExpedientes: Set<string>
+  ): Sancion[] {
+    if (!Array.isArray(auditLogs) || auditLogs.length === 0 || !Array.isArray(alumnos) || alumnos.length === 0) {
+      return [];
+    }
+
+    const elimLogs = auditLogs.filter(l => l.accion === 'ELIMINAR_PARTE');
+    const crearLogs = auditLogs.filter(l => l.accion === 'CREAR_PARTE');
+
+    const modByExpAndStudent = new Map<string, { puntos_restados?: number; saldo_resultante?: number; codigo_infraccion?: string }>();
+    const tramByExp = new Map<string, { estado_tramitacion: Sancion['estado_tramitacion']; observaciones_tramitacion: string }>();
+    const pacByExp = new Map<string, { estado_pac: Sancion['estado_pac']; profesor_pac_receptor: string }>();
+
+    [...auditLogs].reverse().forEach(l => {
+      if (l.accion === 'MODIFICAR_PARTE') {
+        const exp = (l.entidad || '').replace('Sancion/', '').trim();
+        const mPts = (l.detalles || '').match(/de\s+(.+?)\.\s*Puntos:\s*-(\d+)\s*->\s*-(\d+)\s*pts\s*\(Saldo resultante:\s*(\d+)/);
+        const mCod = (l.detalles || '').match(/\(([A-Z0-9-]+)\)/);
+        if (exp && mPts) {
+          const stNorm = normalizarNombreComparacion(mPts[1], '');
+          modByExpAndStudent.set(`${exp}|${stNorm}`, {
+            puntos_restados: parseInt(mPts[3], 10),
+            saldo_resultante: parseInt(mPts[4], 10),
+            codigo_infraccion: mCod ? mCod[1] : undefined,
+          });
+        }
+      } else if (l.accion === 'ACTUALIZAR_TRAMITACION') {
+        const exp = (l.entidad || '').replace('Sancion/', '').trim();
+        const mEst = (l.detalles || '').match(/actualizada a\s+([A-Z_]+)\.\s*Nota:\s*(.*)$/);
+        if (exp && mEst) {
+          tramByExp.set(exp, {
+            estado_tramitacion: mEst[1] as Sancion['estado_tramitacion'],
+            observaciones_tramitacion: mEst[2].trim(),
+          });
+        }
+      } else if (l.accion === 'RECEPCION_PAC') {
+        const exp = (l.entidad || '').replace('AulaPAC/', '').trim();
+        const mPac = (l.detalles || '').match(/cambiado a\s+([A-Z_]+)\s+por\s+(.+)\.$/);
+        if (exp && mPac) {
+          pacByExp.set(exp, {
+            estado_pac: mPac[1] as Sancion['estado_pac'],
+            profesor_pac_receptor: mPac[2].trim(),
+          });
+        }
+      }
+    });
+
+    const getTramoFromHora = (horaStr: string): Sancion['tramo_horario'] => {
+      const [h, m] = (horaStr || '09:00').split(':').map(Number);
+      const mins = (h || 9) * 60 + (m || 0);
+      if (mins < 9 * 60 + 30) return '1ª Hora (08:30 - 09:30)';
+      if (mins < 10 * 60 + 30) return '2ª Hora (09:30 - 10:30)';
+      if (mins < 11 * 60 + 30) return '3ª Hora (10:30 - 11:30)';
+      if (mins < 12 * 60) return 'Recreo (11:30 - 12:00)';
+      if (mins < 13 * 60) return '4ª Hora (12:00 - 13:00)';
+      if (mins < 14 * 60) return '5ª Hora (13:00 - 14:00)';
+      return '6ª Hora (14:00 - 15:00)';
+    };
+
+    const recovered: Sancion[] = [];
+
+    crearLogs.forEach(l => {
+      if (!l || l.entidad === 'Sancion/TEST-SEC-07') return;
+      const exp = (l.entidad || '').replace('Sancion/', '').trim();
+      if (!exp) return;
+
+      const m = (l.detalles || '').match(/^Parte\s+([A-Z0-9-]+)\s+a\s+(.+?)\s+\(-(\d+)\s+pts\)\.\s+Saldo:\s+(\d+)\s+->\s+(\d+)\.\s+Medida:\s+([^\.[]+)/);
+      if (!m) return;
+
+      const [, rawCodigo, alumnoFullName, rawPts, rawAnt, rawRes, rawMedida] = m;
+      const stNorm = normalizarNombreComparacion(alumnoFullName, '');
+
+      // Verificar si fue eliminado oficialmente en ELIMINAR_PARTE
+      const wasExplicitlyDeleted = elimLogs.some(el => {
+        const elExp = (el.entidad || '').replace('Sancion/', '').trim();
+        if (elExp !== exp) return false;
+        return normalizarNombreComparacion(el.detalles || '', '').includes(stNorm);
+      });
+      if (wasExplicitlyDeleted) return;
+
+      // Si ya existe en sanciones activas con ese expediente y no es el caso de colisión de expediente, omitir
+      if (existingExpedientes.has(exp) && exp !== '2026/850-BI') return;
+
+      const alm = alumnos.find(a =>
+        normalizarNombreComparacion(a.nombre, a.apellidos) === stNorm ||
+        normalizarNombreComparacion(a.apellidos, a.nombre) === stNorm
+      );
+      if (!alm) return;
+
+      const prof = profesores.find(p => (p.email || '').toLowerCase().trim() === (l.usuario_email || '').toLowerCase().trim());
+      const nombreProf = prof ? `${prof.nombre} ${prof.apellidos}` : l.usuario_email;
+      const idProf = prof ? prof.id_profesor : 'prof-01';
+      const materiaProf = prof?.departamento || 'Docencia';
+
+      const logTs = parseInt((l.id_log.match(/log-(\d+)-/) || [])[1] || String(new Date(l.timestamp).getTime()), 10);
+      const cleanSncId = `snc-rec-${logTs}`;
+
+      const dObj = new Date(l.timestamp);
+      const spainDate = new Date(dObj.getTime() + 2 * 60 * 60 * 1000);
+      const fecha = spainDate.toISOString().split('T')[0];
+      const hora = spainDate.toISOString().split('T')[1].substring(0, 5);
+      const tramo = getTramoFromHora(hora);
+
+      const mod = modByExpAndStudent.get(`${exp}|${stNorm}`);
+      const codigo = (mod?.codigo_infraccion || rawCodigo) as Sancion['codigo_infraccion'];
+      const puntosRestados = mod?.puntos_restados !== undefined ? mod.puntos_restados : parseInt(rawPts, 10);
+      const saldoAnt = parseInt(rawAnt, 10);
+      const saldoRes = mod?.saldo_resultante !== undefined ? mod.saldo_resultante : parseInt(rawRes, 10);
+
+      const medidaTexto = rawMedida.trim();
+      let medidaCode: Sancion['medida_inmediata'] = 'AMONESTACION_VERBAL';
+      if (medidaTexto.includes('PAC')) medidaCode = 'AULA_PAC';
+      else if (medidaTexto.includes('Jefatura')) medidaCode = 'DERIVACION_JEFATURA';
+      else if (medidaTexto.includes('móvil') || medidaTexto.includes('movil')) medidaCode = 'RETIRADA_MOVIL';
+
+      const derivadoPac = medidaCode === 'AULA_PAC' || pacByExp.has(exp);
+      const pacInfo = pacByExp.get(exp);
+      const tramInfo = tramByExp.get(exp);
+      const tipoConducta: Sancion['tipo_conducta'] = codigo.startsWith('GRA-')
+        ? 'GRAVE'
+        : (codigo.startsWith('ACA-') ? 'ACADEMICO' : 'LEVE');
+
+      recovered.push({
+        timestamp: l.timestamp,
+        fecha,
+        hora_incidente: hora,
+        tramo_horario: tramo,
+        hora_registro: hora,
+        registro_diferido: false,
+        id_alumno: alm.id_alumno,
+        id_profesor: idProf,
+        nombre_profesor: nombreProf,
+        materia: materiaProf,
+        codigo_infraccion: codigo,
+        tipo_conducta: tipoConducta,
+        puntos_restados: puntosRestados,
+        saldo_anterior: saldoAnt,
+        saldo_resultante: saldoRes,
+        descripcion_hechos: `Incidencia registrada según tipificación ROF (${codigo}). Medida adoptada: ${medidaTexto}.`,
+        medida_inmediata: medidaCode,
+        medida_inmediata_texto: medidaTexto,
+        ubicacion: codigo === 'LEV-PASILLO' ? 'Pasillos' : 'Aula ordinaria',
+        derivado_pac: derivadoPac,
+        estado_pac: pacInfo ? pacInfo.estado_pac : (derivadoPac ? 'EN_TRANSITO' : 'NO_APLICA'),
+        profesor_pac_receptor: pacInfo ? pacInfo.profesor_pac_receptor : undefined,
+        estado_tramitacion: tramInfo ? tramInfo.estado_tramitacion : 'PENDIENTE_NOTIFICACION',
+        observaciones_tramitacion: tramInfo ? tramInfo.observaciones_tramitacion : undefined,
+        fecha_comunicacion_familia: fecha,
+        id_sancion: cleanSncId,
+        numero_expediente: exp,
+        url_pdf_drive: `https://drive.google.com/corp/partes/2026/${alm.grupo}/PARTE_${exp.replace('/', '_')}.pdf`,
+      });
+      existingExpedientes.add(exp);
+    });
+
+    return recovered;
   }
 
   /**
@@ -2303,8 +2490,8 @@ export class StorageService {
     if (!raw) return [];
     try {
       const parsed: CursoAcademicoArchivo[] = JSON.parse(raw);
-      // Purgar de forma permanente cualquier curso anterior ya que el centro inició el uso este curso
-      const filtrados = parsed.filter(c => c.id_curso !== '2024/2025' && c.id_curso !== '2025/2026' && c.id_curso !== '2026/2027');
+      // Purgar de forma permanente cualquier curso de prueba o ficticio previo
+      const filtrados = parsed.filter(c => c.id_curso !== '2024/2025' && c.id_curso !== '2025/2026');
       if (filtrados.length !== parsed.length) {
         localStorage.setItem(KEY_HISTORICO_CURSOS, JSON.stringify(filtrados));
       }

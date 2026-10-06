@@ -651,37 +651,95 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                 type="file"
                 accept=".json"
                 className="hidden"
-                onChange={(e) => {
+                onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
+                  setIsSimulatingSync(true);
+                  setSyncFeedback(`Procesando archivo "${file.name}"...`);
                   const reader = new FileReader();
-                  reader.onload = (event) => {
+                  reader.onload = async (event) => {
                     try {
-                      const data = JSON.parse(event.target?.result as string);
-                      if (data.profesores && Array.isArray(data.profesores)) {
-                        StorageService.saveProfesores(data.profesores);
+                      const rawContent = (event.target?.result as string) || '';
+                      let data: any;
+                      try {
+                        data = JSON.parse(rawContent);
+                      } catch {
+                        const trimmed = rawContent.trim();
+                        if (trimmed.startsWith('data=')) {
+                          data = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' ')));
+                        } else {
+                          throw new Error('JSON inválido');
+                        }
                       }
-                      if (data.credenciales_profesores && typeof data.credenciales_profesores === 'object') {
+
+                      // Soportar tanto objeto completo { alumnos, sanciones } como arrays o archivos de curso
+                      const incomingProfesores = Array.isArray(data?.profesores) ? data.profesores : [];
+                      const incomingAlumnos = Array.isArray(data?.alumnos)
+                        ? data.alumnos
+                        : (Array.isArray(data?.alumnos_archivo) ? data.alumnos_archivo : []);
+                      let incomingSanciones: Sancion[] = [];
+                      if (Array.isArray(data?.sanciones)) {
+                        incomingSanciones = data.sanciones;
+                      } else if (Array.isArray(data?.partes)) {
+                        incomingSanciones = data.partes;
+                      } else if (Array.isArray(data?.sanciones_archivo)) {
+                        incomingSanciones = data.sanciones_archivo;
+                      } else if (Array.isArray(data)) {
+                        incomingSanciones = data;
+                      }
+
+                      // Si vienen también en cursos archivados dentro del JSON, rescatarlos si la lista principal tuviera menos
+                      if (Array.isArray(data?.historico_cursos)) {
+                        data.historico_cursos.forEach((hc: any) => {
+                          if (Array.isArray(hc?.sanciones_archivo)) {
+                            const existingIds = new Set(incomingSanciones.map(s => s.id_sancion));
+                            hc.sanciones_archivo.forEach((sa: Sancion) => {
+                              if (sa?.id_sancion && !existingIds.has(sa.id_sancion)) {
+                                incomingSanciones.push(sa);
+                              }
+                            });
+                          }
+                        });
+                      }
+
+                      if (incomingProfesores.length > 0) {
+                        StorageService.saveProfesores(incomingProfesores);
+                      }
+                      if (data?.credenciales_profesores && typeof data.credenciales_profesores === 'object') {
                         AuthService.mergeRemoteCredentials(data.credenciales_profesores);
                       }
-                      if (data.alumnos && Array.isArray(data.alumnos)) {
+                      if (incomingAlumnos.length > 0) {
                         StorageService.saveDeletedAlumnoIds([]);
-                        StorageService.saveAlumnos(data.alumnos);
+                        StorageService.saveAlumnos(incomingAlumnos);
                       }
-                      if (data.sanciones && Array.isArray(data.sanciones)) {
-                        StorageService.saveDeletedSancionIds([]);
-                        StorageService.saveSanciones(data.sanciones);
+
+                      // Limpiar cualquier marca de borrado previa y guardar el 100% de las sanciones del archivo
+                      StorageService.saveDeletedSancionIds([]);
+                      if (incomingSanciones.length > 0) {
+                        // Marcar todos los partes restaurados como pendientes de subida para que el servidor de Drive nunca los descarte
+                        StorageService.savePendingSyncSancionIds(incomingSanciones.map(s => s.id_sancion).filter(Boolean));
+                        StorageService.saveSanciones(incomingSanciones);
                       }
-                      if (data.compensaciones && Array.isArray(data.compensaciones)) {
+
+                      if (Array.isArray(data?.compensaciones) && data.compensaciones.length > 0) {
                         StorageService.saveCompensaciones(data.compensaciones);
                       }
+                      if (Array.isArray(data?.audit_logs) && data.audit_logs.length > 0) {
+                        StorageService.saveAuditLogs(data.audit_logs);
+                      }
+
                       StorageService.recalcularPuntosAlumnos();
-                      GoogleDriveSyncService.pushToGoogleDrive().catch(() => {});
-                      setSyncFeedback(`¡Base de datos cargada y sincronizada correctamente (${data.sanciones?.length || 0} partes y ${data.alumnos?.length || 0} alumnos restaurados)!`);
+
+                      setSyncFeedback(`Subiendo ${incomingSanciones.length} partes y ${incomingAlumnos.length || StorageService.getAlumnos().length} alumnos a Google Drive...`);
+                      await GoogleDriveSyncService.pushToGoogleDrive();
+                      setIsSimulatingSync(false);
+                      setSyncFeedback(`✅ ¡Restauración completada con éxito! Se han cargado ${incomingSanciones.length} partes y ${StorageService.getAlumnos().length} alumnos.`);
+                      window.dispatchEvent(new Event('focus'));
                       setTimeout(() => {
                         window.location.reload();
-                      }, 1000);
+                      }, 1200);
                     } catch (err: any) {
+                      setIsSimulatingSync(false);
                       setSyncFeedback('Error: El archivo seleccionado no tiene un formato JSON válido.');
                     }
                   };

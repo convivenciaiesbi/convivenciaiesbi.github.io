@@ -138,7 +138,7 @@ export class GoogleDriveSyncService {
    * Utiliza reconciliación bidireccional con soporte estricto de borrados (tombstones) para que
    * cuando un administrador o docente elimina un parte, se borre de inmediato en todos los ordenadores y sesiones.
    */
-  static async pullFromGoogleDrive(options?: { forceRefresh?: boolean }): Promise<{ success: boolean; message: string; notModified?: boolean; dataCount?: { profesores: number; alumnos: number; sanciones: number } }> {
+  static async pullFromGoogleDrive(options?: { forceRefresh?: boolean; skipAutoPush?: boolean }): Promise<{ success: boolean; message: string; notModified?: boolean; dataCount?: { profesores: number; alumnos: number; sanciones: number } }> {
     const apiUrl = this.getSyncApiUrl();
     if (!apiUrl) {
       const profesores = StorageService.getProfesores();
@@ -221,7 +221,14 @@ export class GoogleDriveSyncService {
       // 0. Reconciliación de Tombstones (Elementos eliminados oficialmente)
       const remoteDeletedSanciones = new Set<string>(remoteData.deleted_sanciones || []);
       const localDeletedSanciones = new Set<string>(StorageService.getDeletedSancionIds());
-      const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones, ...localDeletedSanciones]);
+      const pendingSyncSancionIds = new Set<string>(StorageService.getPendingSyncSancionIds());
+
+      // Solo mantener tombstones que estén en el servidor o que acaben de ser eliminados en este dispositivo
+      const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones]);
+      localDeletedSanciones.forEach(id => {
+        // Si no está activo en la lista oficial de sanciones del servidor, conservar el tombstone
+        allDeletedSanciones.add(id);
+      });
 
       // Si vienen sanciones en remoteData.sanciones, esas sanciones son ACTIVAS en el archivo JSON de Drive y NUNCA deben descartarse por tombstones locales antiguos
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
@@ -256,8 +263,6 @@ export class GoogleDriveSyncService {
       const localResets = new Set<string>(AuthService.getResetCredentialsEmails());
       const allResets = new Set<string>([...remoteResets, ...localResets]);
       AuthService.saveResetCredentialsEmails(Array.from(allResets));
-
-      const pendingSyncSancionIds = new Set<string>(StorageService.getPendingSyncSancionIds());
 
       // 1. Fusión de Profesores (Unión por id o email respetando eliminados)
       if (remoteData.profesores && Array.isArray(remoteData.profesores)) {
@@ -337,24 +342,20 @@ export class GoogleDriveSyncService {
               sancionMap.set(localS.id_sancion, { ...existingRemote, ...localS });
             }
           } else {
-            // Existe localmente pero NO en el servidor
-            if (pendingSyncSancionIds.has(localS.id_sancion)) {
-              // Es un parte creado localmente que todavía no se había subido a Drive
+            // Existe localmente pero NO en el servidor:
+            // Solo conservar si es un parte recién creado/restaurado en este equipo pendiente de subir,
+            // o si el archivo remoto estuviera completamente vacío por accidente
+            if (pendingSyncSancionIds.has(localS.id_sancion) && !remoteDeletedSanciones.has(localS.id_sancion)) {
               sancionMap.set(localS.id_sancion, localS);
               localHasPendingData = true;
             } else if (remoteData.sanciones.length === 0 && localSanciones.length > 0 && !remoteDeletedSanciones.has(localS.id_sancion)) {
-              // Si el archivo remoto estaba vacío por error pero tenemos partes locales legítimos no borrados remotamente, conservarlos
               sancionMap.set(localS.id_sancion, localS);
               localHasPendingData = true;
             }
           }
         });
 
-        const mergedSanciones = Array.from(sancionMap.values()).sort((a, b) => {
-          const timeA = new Date(a.timestamp || `${a.fecha || ''}T${a.hora_incidente || '08:00'}:00`).getTime() || 0;
-          const timeB = new Date(b.timestamp || `${b.fecha || ''}T${b.hora_incidente || '08:00'}:00`).getTime() || 0;
-          return timeB - timeA;
-        });
+        const mergedSanciones = StorageService.deduplicarSancionesPorExpediente(Array.from(sancionMap.values()));
 
         StorageService.saveSanciones(mergedSanciones);
       }
@@ -436,7 +437,7 @@ export class GoogleDriveSyncService {
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
 
       // Si teníamos datos locales pendientes que el servidor no tenía, sincronizar de vuelta
-      if (localHasPendingData) {
+      if (localHasPendingData && !options?.skipAutoPush) {
         this.triggerFastSync(200);
       }
 
@@ -459,11 +460,11 @@ export class GoogleDriveSyncService {
 
   /**
    * Sube los datos locales hacia Google Drive de manera ultrarrápida y segura para concurrencia.
-   * Dispone de cola inteligente: si ya hay una subida en curso, encola la siguiente para no saturar.
+   * Antes de subir, realiza una lectura y fusión atómica (Read-Modify-Write) desde Drive
+   * para garantizar que dos dispositivos simultáneos nunca sobrescriban los cambios del otro.
    */
   static async pushToGoogleDrive(): Promise<{ success: boolean; message: string }> {
     const apiUrl = this.getSyncApiUrl();
-    const payload = this.getFullDatabasePayload();
 
     if (!apiUrl) {
       StorageService.crearSnapshotBackup('sistema@g.educaand.es');
@@ -484,6 +485,15 @@ export class GoogleDriveSyncService {
     }
 
     this.isPushing = true;
+
+    // 0. Fusión atómica previa (Read-Modify-Write): descargar y fusionar estado remoto actual antes de empaquetar
+    try {
+      await this.pullFromGoogleDrive({ forceRefresh: true, skipAutoPush: true });
+    } catch {
+      // Si la red falla puntualmente en la lectura previa, continuar con el estado local
+    }
+
+    const payload = this.getFullDatabasePayload();
     const jsonString = JSON.stringify(payload);
 
     // 1. Envío estándar con text/plain (CORS-safelisted, sin preflight OPTIONS y sin envoltorio data=)
