@@ -223,11 +223,12 @@ export class GoogleDriveSyncService {
       const localDeletedSanciones = new Set<string>(StorageService.getDeletedSancionIds());
       const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones, ...localDeletedSanciones]);
 
-      // Si vienen sanciones en remoteData.sanciones, esas sanciones son ACTIVAS y no deben considerarse eliminadas
+      // Si vienen sanciones en remoteData.sanciones, esas sanciones son ACTIVAS en el archivo JSON de Drive y NUNCA deben descartarse por tombstones locales antiguos
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
         remoteData.sanciones.forEach((s: Sancion) => {
           if (s?.id_sancion) {
             allDeletedSanciones.delete(s.id_sancion);
+            StorageService.removeDeletedSancionId(s.id_sancion);
           }
         });
       }
@@ -306,14 +307,14 @@ export class GoogleDriveSyncService {
         AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores, Array.from(allResets));
       }
 
-      // 3. Fusión de Sanciones (con eliminación real e inmediata en todos los clientes)
+      // 3. Fusión de Sanciones (preservando el 100% de las sanciones activas en el JSON de Drive)
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
         const localSanciones = StorageService.getSanciones();
         const sancionMap = new Map<string, Sancion>();
 
-        // Cargar remotas descartando las eliminadas
+        // Cargar todas las sanciones que están en el JSON remoto de Drive
         remoteData.sanciones.forEach((s: Sancion) => {
-          if (s?.id_sancion && !allDeletedSanciones.has(s.id_sancion)) {
+          if (s?.id_sancion) {
             sancionMap.set(s.id_sancion, s);
           }
         });
@@ -322,8 +323,8 @@ export class GoogleDriveSyncService {
         localSanciones.forEach(localS => {
           if (!localS?.id_sancion) return;
 
-          // Si el parte fue eliminado (remota o localmente), descartarlo completamente
-          if (allDeletedSanciones.has(localS.id_sancion)) {
+          // Si el parte fue eliminado y no está en Drive, descartarlo
+          if (allDeletedSanciones.has(localS.id_sancion) && !sancionMap.has(localS.id_sancion)) {
             return;
           }
 
@@ -341,14 +342,21 @@ export class GoogleDriveSyncService {
               // Es un parte creado localmente que todavía no se había subido a Drive
               sancionMap.set(localS.id_sancion, localS);
               localHasPendingData = true;
-            } else {
-              // No estaba pendiente de subida: significa que fue ELIMINADO en otro equipo
-              // Lo eliminamos localmente y lo registramos como eliminado para no resucitarlo
-              StorageService.addDeletedSancionId(localS.id_sancion);
+            } else if (remoteData.sanciones.length === 0 && localSanciones.length > 0 && !remoteDeletedSanciones.has(localS.id_sancion)) {
+              // Si el archivo remoto estaba vacío por error pero tenemos partes locales legítimos no borrados remotamente, conservarlos
+              sancionMap.set(localS.id_sancion, localS);
+              localHasPendingData = true;
             }
           }
         });
-        StorageService.saveSanciones(Array.from(sancionMap.values()));
+
+        const mergedSanciones = Array.from(sancionMap.values()).sort((a, b) => {
+          const timeA = new Date(a.timestamp || `${a.fecha || ''}T${a.hora_incidente || '08:00'}:00`).getTime() || 0;
+          const timeB = new Date(b.timestamp || `${b.fecha || ''}T${b.hora_incidente || '08:00'}:00`).getTime() || 0;
+          return timeB - timeA;
+        });
+
+        StorageService.saveSanciones(mergedSanciones);
       }
 
       // 4. Fusión de Compensaciones (Unión por id_compensacion)

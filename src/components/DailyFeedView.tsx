@@ -72,8 +72,8 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   const today = new Date().toISOString().split('T')[0];
   const isAdmin = AuthService.isAdmin(currentUser);
 
-  // Filters
-  const [filterDate, setFilterDate] = useState<string>(today);
+  // Filters - Default to '' (Todas las fechas) so all sanctions in the JSON are immediately visible
+  const [filterDate, setFilterDate] = useState<string>('');
   const [filterGrupo, setFilterGrupo] = useState<string>('TODOS');
   const [filterEstado, setFilterEstado] = useState<string>('TODOS');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -345,7 +345,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
             >
               <div className="flex items-center justify-between text-slate-600">
                 <span className="text-[11px] font-bold uppercase tracking-wider">
-                  Partes del Día
+                  {filterDate ? 'Partes del Día' : 'Partes Registrados'}
                 </span>
                 <span className="text-xs text-sky-700 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-0.5">
                   Ver detalle &rarr;
@@ -355,7 +355,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
                 {statsDay.total}
               </div>
               <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-                <span>Fecha: {filterDate || 'Histórico'}</span>
+                <span>{filterDate ? `Fecha: ${filterDate}` : 'Todo el curso'}</span>
                 <span className="text-sky-800 font-semibold">
                   {statsDay.leves}L · {statsDay.graves}G · {statsDay.muyGraves}MG
                 </span>
@@ -450,32 +450,41 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
       {/* Filter and Search Bar */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-xs flex-1">
-          {/* Date Picker */}
+          {/* Date Picker & Quick Mode Toggle */}
           <div className="flex items-center gap-1.5 bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setFilterDate('')}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                filterDate === ''
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+              }`}
+              title="Mostrar todos los partes de todos los días del curso"
+            >
+              Todos ({sanciones.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterDate(today)}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition-colors cursor-pointer ${
+                filterDate === today
+                  ? 'bg-sky-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/70'
+              }`}
+              title="Mostrar únicamente los partes de hoy"
+            >
+              Hoy ({sanciones.filter(s => s.fecha === today).length})
+            </button>
+            <span className="text-slate-300">|</span>
             <Calendar className="w-3.5 h-3.5 text-slate-500" />
             <input
               type="date"
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
               className="bg-transparent font-mono text-xs focus:outline-none text-slate-800 cursor-pointer"
+              title="Filtrar por una fecha concreta"
             />
-            {filterDate !== today && (
-              <button
-                onClick={() => setFilterDate(today)}
-                className="text-[10px] text-sky-700 font-semibold underline ml-1 cursor-pointer"
-              >
-                Hoy
-              </button>
-            )}
-            {filterDate && (
-              <button
-                onClick={() => setFilterDate('')}
-                className="text-[10px] text-slate-500 hover:text-slate-800 ml-1 cursor-pointer"
-                title="Ver todos los días"
-              >
-                Todos
-              </button>
-            )}
           </div>
 
           {/* Group Filter */}

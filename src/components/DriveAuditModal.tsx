@@ -631,15 +631,19 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                         AuthService.mergeRemoteCredentials(data.credenciales_profesores);
                       }
                       if (data.alumnos && Array.isArray(data.alumnos)) {
+                        StorageService.saveDeletedAlumnoIds([]);
                         StorageService.saveAlumnos(data.alumnos);
                       }
                       if (data.sanciones && Array.isArray(data.sanciones)) {
+                        StorageService.saveDeletedSancionIds([]);
                         StorageService.saveSanciones(data.sanciones);
                       }
                       if (data.compensaciones && Array.isArray(data.compensaciones)) {
                         StorageService.saveCompensaciones(data.compensaciones);
                       }
-                      setSyncFeedback('¡Base de datos cargada y sincronizada correctamente en este dispositivo!');
+                      StorageService.recalcularPuntosAlumnos();
+                      GoogleDriveSyncService.pushToGoogleDrive().catch(() => {});
+                      setSyncFeedback(`¡Base de datos cargada y sincronizada correctamente (${data.sanciones?.length || 0} partes y ${data.alumnos?.length || 0} alumnos restaurados)!`);
                       setTimeout(() => {
                         window.location.reload();
                       }, 1000);

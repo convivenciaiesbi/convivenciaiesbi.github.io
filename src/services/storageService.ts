@@ -1065,7 +1065,7 @@ export class StorageService {
     try {
       const parsed: Sancion[] = JSON.parse(raw);
       // Migración de etiquetas horarias si existían con el horario previo
-      const mapped = parsed.map(s => {
+      const mapped = parsed.filter(s => s && s.id_sancion).map(s => {
         let th = s.tramo_horario;
         if ((th as string) === '1ª Hora (08:15 - 09:15)') th = '1ª Hora (08:30 - 09:30)';
         else if ((th as string) === '2ª Hora (09:15 - 10:15)') th = '2ª Hora (09:30 - 10:30)';
@@ -1076,7 +1076,11 @@ export class StorageService {
         else if ((th as string) === '6ª Hora (13:45 - 14:45)') th = '6ª Hora (14:00 - 15:00)';
         return { ...s, tramo_horario: th };
       });
-      return mapped;
+      return mapped.sort((a, b) => {
+        const timeA = new Date(a.timestamp || `${a.fecha || ''}T${a.hora_incidente || '08:00'}:00`).getTime() || 0;
+        const timeB = new Date(b.timestamp || `${b.fecha || ''}T${b.hora_incidente || '08:00'}:00`).getTime() || 0;
+        return timeB - timeA;
+      });
     } catch {
       return SANCIONES_INICIALES;
     }
@@ -1283,11 +1287,10 @@ export class StorageService {
   }
 
   /**
-   * Obtiene todas las sanciones activas (excluyendo las eliminadas / anuladas).
+   * Obtiene todas las sanciones activas almacenadas en el registro.
    */
   static getActiveSanciones(): Sancion[] {
-    const deletedSancionIds = new Set(this.getDeletedSancionIds());
-    return this.getSanciones().filter((s: Sancion) => s && s.id_sancion && !deletedSancionIds.has(s.id_sancion));
+    return this.getSanciones().filter((s: Sancion) => Boolean(s && s.id_sancion));
   }
 
   /**
@@ -1491,8 +1494,7 @@ export class StorageService {
   static recalcularPuntosAlumnos(targetIdAlumno?: string): Alumno[] {
     const alumnos = this.getAlumnos();
     const sanciones = this.getSanciones();
-    const deletedSancionIds = new Set(this.getDeletedSancionIds());
-    const activeSanciones = sanciones.filter(s => s && s.id_sancion && !deletedSancionIds.has(s.id_sancion));
+    const activeSanciones = sanciones.filter(s => Boolean(s && s.id_sancion));
     const movimientos = this.getMovimientos();
 
     let modificado = false;

@@ -172,8 +172,12 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
 
   // Filter dataset for Year A
   const datasetYearA = useMemo(() => {
+    if (selectedYear === currentCourseId) {
+      // Para el curso actual activo, mostrar el 100% de los partes activos en el sistema
+      return sanciones;
+    }
     return allSancionesCombined.filter(s => getAcademicYearFromDate(s.fecha) === selectedYear);
-  }, [allSancionesCombined, selectedYear]);
+  }, [allSancionesCombined, sanciones, selectedYear, currentCourseId]);
 
   // Filter dataset for Year B (when comparing)
   const datasetYearB = useMemo(() => {
