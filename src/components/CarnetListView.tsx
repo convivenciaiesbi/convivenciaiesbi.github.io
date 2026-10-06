@@ -877,7 +877,8 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
 
             {/* Partes Disciplinarios Activos del Alumno */}
             {(() => {
-              const alumnoSanciones = sanciones.filter(s => s.id_alumno === historyModalAlumno.id_alumno);
+              const cleanAlmId = (historyModalAlumno.id_alumno || '').toLowerCase().trim();
+              const alumnoSanciones = sanciones.filter(s => (s.id_alumno || '').toLowerCase().trim() === cleanAlmId);
               if (alumnoSanciones.length === 0) return null;
               return (
                 <div className="space-y-2">

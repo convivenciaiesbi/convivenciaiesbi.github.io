@@ -29,7 +29,7 @@ import {
   Trash2,
   Pencil
 } from 'lucide-react';
-import { Sancion, Alumno, Profesor, EstadoTramitacion, CodigoInfraccionROF, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
+import { Sancion, Alumno, Profesor, EstadoTramitacion, CodigoInfraccionROF, LISTA_GRUPOS_OFICIALES, GrupoEducativo } from '../types/convivencia';
 import { MATRIZ_ROF_CATALOG } from '../data/rofCatalog';
 import { AuthService } from '../services/authService';
 import { EditarParteModal } from './EditarParteModal';
@@ -100,10 +100,51 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   } | null>(null);
   const [callNotes, setCallNotes] = useState('');
 
-  // Map of Alumno by ID for quick lookups
+  // Map of Alumno by ID for quick lookups with resilient matching
   const alumnoMap = useMemo(() => {
-    return new Map(alumnos.map(a => [a.id_alumno, a]));
+    const map = new Map<string, Alumno>();
+    alumnos.forEach(a => {
+      if (a.id_alumno) {
+        map.set(a.id_alumno, a);
+        map.set(a.id_alumno.toLowerCase(), a);
+        map.set(a.id_alumno.toUpperCase(), a);
+      }
+      if (a.nie) {
+        map.set(a.nie.toUpperCase(), a);
+      }
+    });
+    return map;
   }, [alumnos]);
+
+  const getAlumnoForSancion = (idAlumno?: string): Alumno => {
+    if (!idAlumno) {
+      return {
+        id_alumno: 'SIN_ID',
+        nombre: 'Alumno/a',
+        apellidos: '(Sin asignar)',
+        grupo: '1ESO_A' as GrupoEducativo,
+        nie: 'S/N',
+        telefono_tutor: '',
+        nombre_tutor: '',
+        puntos_actuales: 10,
+        estado: 'ACTIVO',
+      };
+    }
+    const found = alumnoMap.get(idAlumno) || alumnoMap.get(idAlumno.toLowerCase()) || alumnoMap.get(idAlumno.toUpperCase());
+    if (found) return found;
+
+    return {
+      id_alumno: idAlumno,
+      nombre: 'Alumno/a',
+      apellidos: `(${idAlumno})`,
+      grupo: '1ESO_A' as GrupoEducativo,
+      nie: 'S/N',
+      telefono_tutor: '',
+      nombre_tutor: '',
+      puntos_actuales: 10,
+      estado: 'ACTIVO',
+    };
+  };
 
   // Sanciones for the active filter date (or all if filterDate is empty)
   const daySancionesList = useMemo(() => {
@@ -116,8 +157,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
       // Date filter
       if (filterDate && s.fecha !== filterDate) return false;
 
-      const alumno = alumnoMap.get(s.id_alumno);
-      if (!alumno) return false;
+      const alumno = getAlumnoForSancion(s.id_alumno);
 
       // Grupo filter
       if (filterGrupo !== 'TODOS' && alumno.grupo !== filterGrupo) return false;
@@ -129,9 +169,9 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const fullName = `${alumno.nombre} ${alumno.apellidos}`.toLowerCase();
-        const profName = s.nombre_profesor.toLowerCase();
+        const profName = (s.nombre_profesor || '').toLowerCase();
         const nie = (alumno.nie || '').toLowerCase();
-        const rof = s.codigo_infraccion.toLowerCase();
+        const rof = (s.codigo_infraccion || '').toLowerCase();
         if (
           !fullName.includes(term) &&
           !profName.includes(term) &&
@@ -485,23 +525,36 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
           <div className="p-12 text-center">
             <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
             <h3 className="text-sm font-semibold text-slate-800">
-              No hay sanciones registradas con estos filtros
+              {filterDate ? `No hay sanciones registradas para la fecha seleccionada (${filterDate})` : 'No hay sanciones registradas con estos filtros'}
             </h3>
             <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-              No se han encontrado partes disciplinarios para la fecha seleccionada ({filterDate || 'todas'}) o los criterios de búsqueda.
+              {filterDate && sanciones.length > 0
+                ? `Existen ${sanciones.length} partes registrados en otras fechas del curso escolar.`
+                : 'No se han encontrado partes disciplinarios para los criterios de búsqueda actuales.'}
             </p>
-            <button
-              onClick={onNavigateToImponer}
-              className="mt-4 px-4 py-2 bg-sky-600 text-white rounded-xl text-xs font-semibold hover:bg-sky-700 transition-colors cursor-pointer"
-            >
-              Registrar nuevo parte ahora
-            </button>
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
+              {filterDate && (
+                <button
+                  type="button"
+                  onClick={() => setFilterDate('')}
+                  className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-semibold hover:bg-slate-900 transition-colors cursor-pointer"
+                >
+                  Ver todos los partes del curso ({sanciones.length})
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onNavigateToImponer}
+                className="px-4 py-2 bg-sky-600 text-white rounded-xl text-xs font-semibold hover:bg-sky-700 transition-colors cursor-pointer"
+              >
+                Registrar nuevo parte ahora
+              </button>
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredSanciones.map((sancion) => {
-              const alumno = alumnoMap.get(sancion.id_alumno);
-              if (!alumno) return null;
+              const alumno = getAlumnoForSancion(sancion.id_alumno);
               const rofDef = MATRIZ_ROF_CATALOG[sancion.codigo_infraccion];
 
               return (

@@ -175,18 +175,18 @@ export default function App() {
       }
     } catch {}
 
-    // 1. Sincronización inmediata al arrancar
-    const syncFromDrive = () => {
-      GoogleDriveSyncService.pullFromGoogleDrive()
+    // 1. Sincronización inmediata al arrancar (fuerza carga completa para recuperar cualquier parte existente)
+    const syncFromDrive = (force = false) => {
+      GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: force })
         .then((res) => {
-          if (res.success && res.dataCount) {
+          if (res.success) {
             refreshAllData();
           }
         })
         .catch(() => {});
     };
 
-    syncFromDrive();
+    syncFromDrive(true);
 
     // 2. Sincronización automática periódica de alta frecuencia (cada 5 segundos) para inmediatez entre aulas
     const intervalId = setInterval(syncFromDrive, 5000);

@@ -23,7 +23,7 @@ import {
   X,
   Pencil
 } from 'lucide-react';
-import { Sancion, Alumno, Profesor, EstadoTramitacion } from '../types/convivencia';
+import { Sancion, Alumno, Profesor, EstadoTramitacion, GrupoEducativo } from '../types/convivencia';
 import { EditarParteModal } from './EditarParteModal';
 
 interface MisPartesDocenteViewProps {
@@ -63,17 +63,63 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
   // Edit modal state
   const [parteToEdit, setParteToEdit] = useState<Sancion | null>(null);
 
-  // Map of students
+  // Map of students with resilient matching
   const alumnoMap = useMemo(() => {
-    return new Map(alumnos.map(a => [a.id_alumno, a]));
+    const map = new Map<string, Alumno>();
+    alumnos.forEach(a => {
+      if (a.id_alumno) {
+        map.set(a.id_alumno, a);
+        map.set(a.id_alumno.toLowerCase(), a);
+        map.set(a.id_alumno.toUpperCase(), a);
+      }
+      if (a.nie) {
+        map.set(a.nie.toUpperCase(), a);
+      }
+    });
+    return map;
   }, [alumnos]);
 
+  const getAlumnoForSancion = (idAlumno?: string): Alumno => {
+    if (!idAlumno) {
+      return {
+        id_alumno: 'SIN_ID',
+        nombre: 'Alumno/a',
+        apellidos: '(Sin asignar)',
+        grupo: '1ESO_A' as GrupoEducativo,
+        nie: 'S/N',
+        telefono_tutor: '',
+        nombre_tutor: '',
+        puntos_actuales: 10,
+        estado: 'ACTIVO',
+      };
+    }
+    const found = alumnoMap.get(idAlumno) || alumnoMap.get(idAlumno.toLowerCase()) || alumnoMap.get(idAlumno.toUpperCase());
+    if (found) return found;
+
+    return {
+      id_alumno: idAlumno,
+      nombre: 'Alumno/a',
+      apellidos: `(${idAlumno})`,
+      grupo: '1ESO_A' as GrupoEducativo,
+      nie: 'S/N',
+      telefono_tutor: '',
+      nombre_tutor: '',
+      puntos_actuales: 10,
+      estado: 'ACTIVO',
+    };
+  };
+
   // Sanciones impuestas por este profesor concreto
-  // Identifica por id_profesor o por coincidencia de email/nombre
+  // Identifica por id_profesor o por coincidencia de nombre/apellidos
   const misPartes = useMemo(() => {
+    const cleanUserName = (currentUser.nombre || '').toLowerCase().trim();
+    const cleanUserSurname = (currentUser.apellidos || '').toLowerCase().trim();
+
     return sanciones.filter(s => {
       if (s.id_profesor === currentUser.id_profesor) return true;
-      if (s.nombre_profesor && s.nombre_profesor.toLowerCase().includes(currentUser.nombre.toLowerCase())) return true;
+      const profName = (s.nombre_profesor || '').toLowerCase();
+      if (cleanUserName && profName.includes(cleanUserName)) return true;
+      if (cleanUserSurname && profName.includes(cleanUserSurname)) return true;
       return false;
     });
   }, [sanciones, currentUser]);
@@ -81,8 +127,7 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
   // Filtrado reactivo
   const filteredPartes = useMemo(() => {
     return misPartes.filter(s => {
-      const alumno = alumnoMap.get(s.id_alumno);
-      if (!alumno) return false;
+      const alumno = getAlumnoForSancion(s.id_alumno);
 
       // Filtro estado
       if (filterEstado !== 'TODOS' && s.estado_tramitacion !== filterEstado) {
@@ -91,7 +136,7 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
 
       // Filtro mes (YYYY-MM)
       if (filterMes !== 'TODOS') {
-        const parteMes = s.fecha.substring(0, 7);
+        const parteMes = (s.fecha || '').substring(0, 7);
         if (parteMes !== filterMes) return false;
       }
 
@@ -99,9 +144,9 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
         const alumnoNombre = `${alumno.nombre} ${alumno.apellidos}`.toLowerCase();
-        const expediente = s.numero_expediente.toLowerCase();
-        const rof = s.codigo_infraccion.toLowerCase();
-        const hechos = s.descripcion_hechos.toLowerCase();
+        const expediente = (s.numero_expediente || '').toLowerCase();
+        const rof = (s.codigo_infraccion || '').toLowerCase();
+        const hechos = (s.descripcion_hechos || '').toLowerCase();
         const grupo = (alumno.grupo || '').toLowerCase();
 
         if (
@@ -336,8 +381,7 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
         ) : (
           <div className="divide-y divide-slate-100">
             {filteredPartes.map(sancion => {
-              const alumno = alumnoMap.get(sancion.id_alumno);
-              if (!alumno) return null;
+              const alumno = getAlumnoForSancion(sancion.id_alumno);
 
               return (
                 <div key={sancion.id_sancion} className="p-4 sm:p-5 hover:bg-slate-50/60 transition-colors">

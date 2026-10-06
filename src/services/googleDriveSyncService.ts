@@ -157,7 +157,11 @@ export class GoogleDriveSyncService {
       // Timeout ágil para no bloquear la interfaz en redes lentas
       const timeoutId = setTimeout(() => controller.abort(), 6000);
 
-      const lastSync = options?.forceRefresh ? '' : (this.getLastSyncTimestamp() || '');
+      const localSancionesCount = StorageService.getSanciones().length;
+      const localAlumnosCount = StorageService.getAlumnos().length;
+      const shouldForceFull = options?.forceRefresh || localSancionesCount === 0 || localAlumnosCount === 0;
+
+      const lastSync = shouldForceFull ? '' : (this.getLastSyncTimestamp() || '');
       const url = `${apiUrl}?action=read_database${lastSync ? `&since=${encodeURIComponent(lastSync)}` : ''}&t=${Date.now()}`;
 
       const response = await fetch(url, {
@@ -196,8 +200,8 @@ export class GoogleDriveSyncService {
         throw new Error('Respuesta inválida del servidor de Google Drive: formato no reconocido.');
       }
 
-      // Si el servidor indica que los datos no han cambiado desde nuestra última sincronización (solo si no forzamos)
-      if (!options?.forceRefresh && remoteData && remoteData.not_modified === true) {
+      // Si el servidor indica que los datos no han cambiado y tenemos datos locales cargados
+      if (!shouldForceFull && remoteData && remoteData.not_modified === true) {
         return {
           success: true,
           notModified: true,
@@ -218,11 +222,27 @@ export class GoogleDriveSyncService {
       const remoteDeletedSanciones = new Set<string>(remoteData.deleted_sanciones || []);
       const localDeletedSanciones = new Set<string>(StorageService.getDeletedSancionIds());
       const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones, ...localDeletedSanciones]);
+
+      // Si vienen sanciones en remoteData.sanciones, esas sanciones son ACTIVAS y no deben considerarse eliminadas
+      if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
+        remoteData.sanciones.forEach((s: Sancion) => {
+          if (s?.id_sancion) {
+            allDeletedSanciones.delete(s.id_sancion);
+          }
+        });
+      }
       StorageService.saveDeletedSancionIds(Array.from(allDeletedSanciones));
 
       const remoteDeletedAlumnos = new Set<string>(remoteData.deleted_alumnos || []);
       const localDeletedAlumnos = new Set<string>(StorageService.getDeletedAlumnoIds());
       const allDeletedAlumnos = new Set<string>([...remoteDeletedAlumnos, ...localDeletedAlumnos]);
+      if (remoteData.alumnos && Array.isArray(remoteData.alumnos)) {
+        remoteData.alumnos.forEach((a: Alumno) => {
+          if (a?.id_alumno) {
+            allDeletedAlumnos.delete(a.id_alumno);
+          }
+        });
+      }
       StorageService.saveDeletedAlumnoIds(Array.from(allDeletedAlumnos));
 
       const remoteDeletedProfs = new Set<string>(remoteData.deleted_profesores || []);
