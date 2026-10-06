@@ -890,12 +890,12 @@ El Amrani Youssef,4º ESO D`;
           <div className="bg-sky-50/50 border border-sky-100 rounded-xl p-3 space-y-1">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                Google Sheets DB
+                Base de Datos JSON Drive
               </span>
               <span className="w-2 h-2 rounded-full bg-sky-500" />
             </div>
-            <div className="font-mono text-xs font-bold text-slate-900 truncate">
-              DB_Convivencia_2026_2027
+            <div className="font-mono text-xs font-bold text-slate-900 truncate" title="00_SIGC_BD_CENTRO_BLAS_INFANTE.json">
+              00_SIGC_BD_CENTRO_BLAS_INFANTE.json
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
               Unidad Compartida: 14007180.aplicaciones@g.educaand.es

@@ -371,34 +371,53 @@ function doPost(e) {
 function leerBaseDatosDesdeDrive() {
   var folder = obtenerCarpetaDestino();
   var files = folder.getFilesByName(NOMBRE_ARCHIVO_DB);
-  if (files.hasNext()) {
-    var file = files.next();
-    var content = file.getBlob().getDataAsString();
-    var parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch (e) {
-      var trimmed = (content || '').trim();
-      if (trimmed.indexOf('data=') === 0) {
-        parsed = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' ')));
-      } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
-        parsed = JSON.parse(decodeURIComponent(trimmed.replace(/\+/g, ' ')));
-      } else {
-        throw e;
-      }
-    }
-    
-    // Almacenar en RAM Cache para que las siguientes lecturas tomen < 40ms
-    try {
-      var cache = CacheService.getScriptCache();
-      cache.put('DB_TIMESTAMP', parsed.timestamp || new Date().toISOString(), 900); // 15 min
-      if (content.length < 95000) {
-        cache.put('DB_FULL_JSON_P1', content, 900);
-      }
-    } catch(e) {}
+  var bestParsed = null;
+  var allSancionesMap = {};
+  var allAlumnosMap = {};
+  var allProfesoresMap = {};
 
-    return parsed;
+  while (files.hasNext()) {
+    var file = files.next();
+    try {
+      var content = file.getBlob().getDataAsString();
+      var parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (e) {
+        var trimmed = (content || '').trim();
+        if (trimmed.indexOf('data=') === 0) {
+          parsed = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' ')));
+        } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
+          parsed = JSON.parse(decodeURIComponent(trimmed.replace(/\+/g, ' ')));
+        } else {
+          continue;
+        }
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        if (!bestParsed || ((parsed.sanciones || []).length > (bestParsed.sanciones || []).length)) {
+          bestParsed = parsed;
+        }
+        (parsed.sanciones || []).forEach(function(s) {
+          if (s && s.id_sancion) allSancionesMap[s.id_sancion] = s;
+        });
+        (parsed.alumnos || []).forEach(function(a) {
+          if (a && a.id_alumno) allAlumnosMap[a.id_alumno] = a;
+        });
+        (parsed.profesores || []).forEach(function(p) {
+          if (p && p.email) allProfesoresMap[p.email.toLowerCase().trim()] = p;
+        });
+      }
+    } catch (err) {}
   }
+
+  if (bestParsed) {
+    bestParsed.sanciones = Object.keys(allSancionesMap).map(function(k) { return allSancionesMap[k]; });
+    bestParsed.alumnos = Object.keys(allAlumnosMap).map(function(k) { return allAlumnosMap[k]; });
+    bestParsed.profesores = Object.keys(allProfesoresMap).map(function(k) { return allProfesoresMap[k]; });
+    return bestParsed;
+  }
+
   return {
     profesores: [],
     credenciales_profesores: {},
@@ -426,10 +445,19 @@ function guardarBaseDatosEnDrive(incomingData) {
       if (currentContent && currentContent.length > 10) {
         var currentData = JSON.parse(currentContent);
         
-        // Unificar listas de IDs eliminados (tombstones)
+        // Unificar listas de IDs eliminados (tombstones), pero nunca eliminar sanciones que vengan activas en finalData
+        var activeIncomingMap = {};
+        (finalData.sanciones || []).forEach(function(s) {
+          if (s && s.id_sancion) activeIncomingMap[s.id_sancion] = true;
+        });
+
         var deletedSancionMap = {};
-        (finalData.deleted_sanciones || []).forEach(function(id) { deletedSancionMap[id] = true; });
-        (currentData.deleted_sanciones || []).forEach(function(id) { deletedSancionMap[id] = true; });
+        (finalData.deleted_sanciones || []).forEach(function(id) {
+          if (!activeIncomingMap[id]) deletedSancionMap[id] = true;
+        });
+        (currentData.deleted_sanciones || []).forEach(function(id) {
+          if (!activeIncomingMap[id]) deletedSancionMap[id] = true;
+        });
         finalData.deleted_sanciones = Object.keys(deletedSancionMap);
 
         var deletedAlumnoMap = {};

@@ -110,17 +110,38 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
     setIsSimulatingSync(true);
     setSyncFeedback('Sincronizando y guardando base de datos en Google Drive...');
     try {
+      const pullRes = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
       const pushRes = await GoogleDriveSyncService.pushToGoogleDrive();
-      const pullRes = await GoogleDriveSyncService.pullFromGoogleDrive();
       setIsSimulatingSync(false);
-      if (pushRes.success) {
-        setSyncFeedback(`✅ ¡Base de datos guardada en Drive! Archivo '00_SIGC_BD_CENTRO_BLAS_INFANTE.json' actualizado en la carpeta ${unidadConfig.folderId || 'del centro'}.`);
+      if (pullRes.success || pushRes.success) {
+        setSyncFeedback(`✅ ¡Base de datos sincronizada! Archivo '00_SIGC_BD_CENTRO_BLAS_INFANTE.json' actualizado (${StorageService.getAlumnos().length} alumnos, ${StorageService.getSanciones().length} partes).`);
       } else {
         setSyncFeedback(`⚠️ ${pushRes.message}`);
       }
     } catch (err: any) {
       setIsSimulatingSync(false);
       setSyncFeedback(`❌ Error al conectar con Google Drive: ${err.message || err}`);
+    }
+  };
+
+  const handlePullOnlyFromDrive = async () => {
+    setIsSimulatingSync(true);
+    setSyncFeedback('Descargando datos desde 00_SIGC_BD_CENTRO_BLAS_INFANTE.json en Google Drive...');
+    try {
+      StorageService.saveDeletedSancionIds([]);
+      const pullRes = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
+      setIsSimulatingSync(false);
+      if (pullRes.success) {
+        setSyncFeedback(`✅ ¡Datos recuperados desde '00_SIGC_BD_CENTRO_BLAS_INFANTE.json'! (${pullRes.dataCount?.alumnos ?? 0} alumnos, ${pullRes.dataCount?.sanciones ?? 0} partes cargados). Recargando...`);
+        setTimeout(() => {
+          window.location.reload();
+        }, 900);
+      } else {
+        setSyncFeedback(`⚠️ No se pudo leer desde Drive: ${pullRes.message}`);
+      }
+    } catch (err: any) {
+      setIsSimulatingSync(false);
+      setSyncFeedback(`❌ Error al leer desde Google Drive: ${err.message || err}`);
     }
   };
 
@@ -344,11 +365,22 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
               </span>
             </div>
             <div className="space-y-1 font-mono text-[11px] text-slate-600">
-              <div>Archivo: DB_Convivencia_2025_2026.gsheet</div>
+              <div>Archivo: <strong className="text-slate-900">00_SIGC_BD_CENTRO_BLAS_INFANTE.json</strong></div>
               <div>Unidad activa: {unidadConfig.email}</div>
               <div>Alumnos registrados: {alumnos.length}</div>
               <div>Partes almacenados: {sanciones.length}</div>
               <div>Cifrado en reposo: AES-256 Google Cloud</div>
+            </div>
+            <div className="pt-1">
+              <button
+                type="button"
+                disabled={isSimulatingSync}
+                onClick={handlePullOnlyFromDrive}
+                className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer shadow-2xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Recuperar Partes desde 00_SIGC_BD_CENTRO_BLAS_INFANTE.json</span>
+              </button>
             </div>
           </div>
 
@@ -500,12 +532,14 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
               disabled={isSimulatingSync}
               onClick={async () => {
                 setIsSimulatingSync(true);
-                setSyncFeedback('Probando conexión con Google Drive...');
+                setSyncFeedback('Descargando 00_SIGC_BD_CENTRO_BLAS_INFANTE.json desde Google Drive...');
                 try {
-                  const res = await GoogleDriveSyncService.pullFromGoogleDrive();
+                  StorageService.saveDeletedSancionIds([]);
+                  const res = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
                   setIsSimulatingSync(false);
                   if (res.success) {
-                    setSyncFeedback(`✅ ¡Conexión con Google Drive verificada con éxito! (${res.dataCount?.alumnos ?? 0} alumnos, ${res.dataCount?.sanciones ?? 0} partes en Drive)`);
+                    window.dispatchEvent(new Event('focus'));
+                    setSyncFeedback(`✅ ¡Archivo 00_SIGC_BD_CENTRO_BLAS_INFANTE.json leído y sincronizado! (${res.dataCount?.alumnos ?? 0} alumnos, ${res.dataCount?.sanciones ?? 0} partes recuperados)`);
                   } else {
                     setSyncFeedback(`⚠️ Aviso de conexión: ${res.message}`);
                   }

@@ -2303,8 +2303,8 @@ export class StorageService {
     if (!raw) return [];
     try {
       const parsed: CursoAcademicoArchivo[] = JSON.parse(raw);
-      // Purgar de forma permanente cualquier curso de prueba o ficticio previo
-      const filtrados = parsed.filter(c => c.id_curso !== '2024/2025' && c.id_curso !== '2025/2026');
+      // Purgar de forma permanente cualquier curso anterior ya que el centro inició el uso este curso
+      const filtrados = parsed.filter(c => c.id_curso !== '2024/2025' && c.id_curso !== '2025/2026' && c.id_curso !== '2026/2027');
       if (filtrados.length !== parsed.length) {
         localStorage.setItem(KEY_HISTORICO_CURSOS, JSON.stringify(filtrados));
       }
