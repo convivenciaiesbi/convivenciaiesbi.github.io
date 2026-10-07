@@ -6,13 +6,13 @@
 import { Alumno, Profesor, Sancion, Compensacion, AuditLog } from '../types/convivencia';
 import { StorageService } from './storageService';
 import { AuthService } from './authService';
+import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS } from '../config/entorno';
 
 const SYNC_URL_STORAGE_KEY = 'sigc_bi_drive_sync_api_url_v1';
 const LAST_SYNC_STORAGE_KEY = 'sigc_bi_last_drive_sync_timestamp_v1';
 
-// Endpoint oficial de Google Apps Script vinculado a la cuenta del centro
-export const DEFAULT_OFFICIAL_DRIVE_API_URL =
-  'https://script.google.com/macros/s/AKfycbyrmV69dBgcg9WD0mx4tQLWeZtbqSR7odMS87HS5VyOPQL90RNNZMkpp5HHGZ30HimLNQ/exec';
+// Endpoint de Google Apps Script según el entorno (ver src/config/entorno.ts)
+export const DEFAULT_OFFICIAL_DRIVE_API_URL = URL_API_DRIVE;
 
 export interface DriveDatabaseState {
   version: string;
@@ -60,6 +60,11 @@ export class GoogleDriveSyncService {
    * Obtiene la URL configurada del Web App de Google Apps Script vinculado al Drive del centro.
    */
   static getSyncApiUrl(): string {
+    // En el entorno de pruebas se ignora cualquier URL guardada en el navegador,
+    // para que nunca se pueda escribir por error en la base de datos real.
+    if (ES_ENTORNO_PRUEBAS) {
+      return URL_API_DRIVE;
+    }
     const custom = localStorage.getItem(SYNC_URL_STORAGE_KEY);
     // Si hay una URL personalizada guardada que sea una URL antigua o vacía, migrar a la nueva oficial
     if (custom && custom.includes('AKfycbzIG544uJnAwpFOVCOb2FeCuFpx1MzZU3nLWY9n-ygLNqzycDqeze5tPX8EHE9pFaEePg')) {

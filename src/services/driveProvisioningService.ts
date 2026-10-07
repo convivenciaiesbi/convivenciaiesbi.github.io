@@ -341,10 +341,10 @@ function doPost(e) {
     } catch (parseErr) {
       var trimmed = (raw || '').trim();
       if (trimmed.indexOf('data=') === 0) {
-        var decoded = decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' '));
+        var decoded = decodeURIComponent(trimmed.substring(5).replace(/\\+/g, ' '));
         postData = JSON.parse(decoded);
       } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
-        var decoded = decodeURIComponent(trimmed.replace(/\+/g, ' '));
+        var decoded = decodeURIComponent(trimmed.replace(/\\+/g, ' '));
         postData = JSON.parse(decoded);
       } else {
         throw parseErr;
@@ -386,9 +386,9 @@ function leerBaseDatosDesdeDrive() {
       } catch (e) {
         var trimmed = (content || '').trim();
         if (trimmed.indexOf('data=') === 0) {
-          parsed = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' ')));
+          parsed = JSON.parse(decodeURIComponent(trimmed.substring(5).replace(/\\+/g, ' ')));
         } else if (trimmed.indexOf('%7B') === 0 || trimmed.indexOf('%7b') === 0) {
-          parsed = JSON.parse(decodeURIComponent(trimmed.replace(/\+/g, ' ')));
+          parsed = JSON.parse(decodeURIComponent(trimmed.replace(/\\+/g, ' ')));
         } else {
           continue;
         }

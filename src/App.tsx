@@ -75,6 +75,7 @@ import {
   Info,
   Clock
 } from 'lucide-react';
+import { EntornoBanner } from './components/EntornoBanner';
 
 export default function App() {
   // Authentication session (null means show LoginView)
@@ -366,13 +367,19 @@ export default function App() {
 
   // 1. Initial Login Screen if no user session
   if (!currentUser) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <>
+        <EntornoBanner />
+        <LoginView onLoginSuccess={handleLoginSuccess} />
+      </>
+    );
   }
 
   const isAdmin = AuthService.isAdmin(currentUser);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50/40 via-slate-50 to-blue-50/30 flex flex-col text-slate-800 font-sans selection:bg-sky-200 selection:text-sky-900">
+      <EntornoBanner />
       {/* Top Bar Header with pastel styling & role-based tabs */}
       <Header
         currentView={currentView}
