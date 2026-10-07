@@ -24,36 +24,49 @@ const KEY_DELETED_ALUMNOS = 'sigc_bi_deleted_alumnos_v1';
 const KEY_DELETED_PROFESORES = 'sigc_bi_deleted_profesores_v1';
 const KEY_PENDING_SYNC_SANCIONES = 'sigc_bi_pending_sync_sanciones_v1';
 
-// Limpieza automática inmediata para asegurar que alumnos y partes queden a cero, y purgar docentes en baja
+// Eliminación proactiva de cualquier caché antigua de datos en localStorage del navegador
+// para garantizar que ningún dispositivo cargue jamás datos obsoletos de la caché local.
 try {
-  const CLEANED_FLAG = 'sigc_bi_cleanup_done_v4';
-  if (typeof window !== 'undefined' && localStorage.getItem(CLEANED_FLAG) !== 'true') {
-    localStorage.removeItem('sigc_bi_alumnos_v2');
-    localStorage.removeItem('sigc_bi_sanciones_v2');
-    localStorage.removeItem('sigc_bi_compensaciones_v2');
-    localStorage.removeItem('sigc_bi_movimientos_v0');
-    localStorage.removeItem('sigc_bi_movimientos_v2');
-    localStorage.setItem(KEY_ALUMNOS, JSON.stringify([]));
-    localStorage.setItem(KEY_SANCIONES, JSON.stringify([]));
-    localStorage.setItem(KEY_COMPENSACIONES, JSON.stringify([]));
-    localStorage.setItem(KEY_MOVIMIENTOS, JSON.stringify([]));
-    localStorage.setItem(CLEANED_FLAG, 'true');
-  }
-
-  // Purgar de forma permanente cualquier profesor en estado INACTIVO
   if (typeof window !== 'undefined') {
-    const rawProfs = localStorage.getItem(KEY_PROFESORES);
-    if (rawProfs) {
-      const parsed = JSON.parse(rawProfs);
-      const cleaned = parsed.filter((p: any) => p.estado !== 'INACTIVO');
-      if (cleaned.length !== parsed.length) {
-        localStorage.setItem(KEY_PROFESORES, JSON.stringify(cleaned));
-      }
-    }
+    const legacyDataKeys = [
+      'sigc_bi_alumnos_v2',
+      'sigc_bi_alumnos_v3',
+      'sigc_bi_profesores_v2',
+      'sigc_bi_sanciones_v2',
+      'sigc_bi_sanciones_v3',
+      'sigc_bi_compensaciones_v2',
+      'sigc_bi_compensaciones_v3',
+      'sigc_bi_audit_logs_v2',
+      'sigc_bi_movimientos_v0',
+      'sigc_bi_movimientos_v2',
+      'sigc_bi_movimientos_v3',
+      'sigc_bi_deleted_sanciones_v1',
+      'sigc_bi_deleted_alumnos_v1',
+      'sigc_bi_deleted_profesores_v1',
+      'sigc_bi_pending_sync_sanciones_v1',
+      'sigc_bi_last_drive_sync_timestamp_v1',
+    ];
+    legacyDataKeys.forEach(k => localStorage.removeItem(k));
   }
 } catch {
   // Ignorar errores de entorno
 }
+
+// Estado en memoria RAM (Volátil / Cero Caché de Navegador para datos del centro)
+let memoryAlumnos: Alumno[] = [...ALUMNOS_INICIALES];
+let memoryProfesores: Profesor[] = [...PROFESORES_INICIALES];
+let memorySanciones: Sancion[] = [...SANCIONES_INICIALES];
+let memoryCompensaciones: Compensacion[] = [...COMPENSACIONES_INICIALES];
+let memoryAuditLogs: AuditLog[] = [...AUDIT_LOGS_INICIALES];
+let memoryMovimientos: MovimientoPuntos[] = [...MOVIMIENTOS_INICIALES];
+let memoryDeletedSanciones: string[] = [];
+let memoryDeletedAlumnos: string[] = [];
+let memoryDeletedProfesores: string[] = [];
+let memoryPendingSyncSanciones: string[] = [];
+let memoryPendingSyncProfesores: string[] = [];
+let memoryPendingSyncAlumnos: string[] = [];
+let memoryLastWriteTimestamp: string | null = null;
+let memoryHasLoadedFromDrive: boolean = false;
 
 export const UNIDAD_INSTITUCIONAL_OFICIAL: UnidadInstitucionalConfig = {
   email: '14007180.aplicaciones@g.educaand.es',
@@ -124,55 +137,65 @@ export class StorageService {
     localStorage.setItem(KEY_UNIDAD_INSTITUCIONAL, JSON.stringify(config));
   }
 
+  static hasLoadedFromDrive(): boolean {
+    return memoryHasLoadedFromDrive;
+  }
+
+  static markLoadedFromDrive(): void {
+    memoryHasLoadedFromDrive = true;
+  }
+
+  static clearMemoryCacheForFreshLogin(): void {
+    memoryAlumnos = [...ALUMNOS_INICIALES];
+    memoryProfesores = [...PROFESORES_INICIALES];
+    memorySanciones = [...SANCIONES_INICIALES];
+    memoryCompensaciones = [...COMPENSACIONES_INICIALES];
+    memoryAuditLogs = [...AUDIT_LOGS_INICIALES];
+    memoryMovimientos = [...MOVIMIENTOS_INICIALES];
+    memoryDeletedSanciones = [];
+    memoryDeletedAlumnos = [];
+    memoryDeletedProfesores = [];
+    memoryPendingSyncSanciones = [];
+    memoryPendingSyncProfesores = [];
+    memoryPendingSyncAlumnos = [];
+    memoryHasLoadedFromDrive = false;
+  }
+
   static touchLocalWriteTimestamp(): void {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(KEY_LAST_LOCAL_WRITE, new Date().toISOString());
-    }
+    memoryLastWriteTimestamp = new Date().toISOString();
   }
 
   static getLastLocalWriteTimestamp(): string | null {
-    if (typeof window === 'undefined') return null;
-    return localStorage.getItem(KEY_LAST_LOCAL_WRITE);
+    return memoryLastWriteTimestamp;
   }
 
   static getAlumnos(): Alumno[] {
-    const raw = localStorage.getItem(KEY_ALUMNOS);
-    if (!raw) {
-      this.saveAlumnos(ALUMNOS_INICIALES);
-      return ALUMNOS_INICIALES;
-    }
-    try {
-      const parsed: Alumno[] = JSON.parse(raw);
-      // Auto-detección y curación transparente si existen alumnos con el mismo nombre o NIE
-      if (parsed.length > 1) {
-        const seenNames = new Set<string>();
-        let hasDuplicates = false;
-        for (const a of parsed) {
-          const k = normalizarNombreComparacion(a.nombre, a.apellidos);
-          if (k) {
-            if (seenNames.has(k)) {
-              hasDuplicates = true;
-              break;
-            }
-            seenNames.add(k);
+    const parsed: Alumno[] = [...memoryAlumnos];
+    if (parsed.length > 1) {
+      const seenNames = new Set<string>();
+      let hasDuplicates = false;
+      for (const a of parsed) {
+        const k = normalizarNombreComparacion(a.nombre, a.apellidos);
+        if (k) {
+          if (seenNames.has(k)) {
+            hasDuplicates = true;
+            break;
           }
-        }
-        if (hasDuplicates) {
-          const res = this.depurarAlumnosDuplicados();
-          if (res.duplicadosEliminados > 0) {
-            const healedRaw = localStorage.getItem(KEY_ALUMNOS);
-            if (healedRaw) return JSON.parse(healedRaw);
-          }
+          seenNames.add(k);
         }
       }
-      return parsed;
-    } catch {
-      return ALUMNOS_INICIALES;
+      if (hasDuplicates) {
+        const res = this.depurarAlumnosDuplicados();
+        if (res.duplicadosEliminados > 0) {
+          return [...memoryAlumnos];
+        }
+      }
     }
+    return parsed;
   }
 
   static saveAlumnos(alumnos: Alumno[]): void {
-    localStorage.setItem(KEY_ALUMNOS, JSON.stringify(alumnos));
+    memoryAlumnos = [...alumnos];
     this.touchLocalWriteTimestamp();
   }
 
@@ -192,15 +215,7 @@ export class StorageService {
     duplicadosEliminados: number;
     gruposFusionados: Array<{ alumnoPrincipal: string; grupo: string; eliminados: string[] }>;
   } {
-    const raw = localStorage.getItem(KEY_ALUMNOS);
-    if (!raw) return { totalOriginal: 0, totalFinal: 0, duplicadosEliminados: 0, gruposFusionados: [] };
-
-    let alumnos: Alumno[] = [];
-    try {
-      alumnos = JSON.parse(raw);
-    } catch {
-      return { totalOriginal: 0, totalFinal: 0, duplicadosEliminados: 0, gruposFusionados: [] };
-    }
+    const alumnos: Alumno[] = [...memoryAlumnos];
 
     if (alumnos.length <= 1) {
       return { totalOriginal: alumnos.length, totalFinal: alumnos.length, duplicadosEliminados: 0, gruposFusionados: [] };
@@ -407,6 +422,7 @@ export class StorageService {
 
     alumnos[idx] = updatedAlumno;
     this.saveAlumnos(alumnos);
+    this.addPendingSyncAlumnoId(updatedAlumno.id_alumno);
 
     this.addAuditLog(
       usuarioOperador,
@@ -442,6 +458,7 @@ export class StorageService {
 
     alumnos[idx] = updatedAlumno;
     this.saveAlumnos(alumnos);
+    this.addPendingSyncAlumnoId(updatedAlumno.id_alumno);
 
     this.addAuditLog(
       usuarioOperador,
@@ -465,6 +482,7 @@ export class StorageService {
     }
 
     const alumnoEliminado = alumnos[idx];
+    this.addDeletedAlumnoId(idAlumno);
     alumnos.splice(idx, 1);
     this.saveAlumnos(alumnos);
 
@@ -523,6 +541,7 @@ export class StorageService {
 
     alumnos.push(nuevoAlumno);
     this.saveAlumnos(alumnos);
+    this.addPendingSyncAlumnoId(nuevoAlumno.id_alumno);
 
     this.addAuditLog(
       usuarioOperador,
@@ -578,6 +597,7 @@ export class StorageService {
 
     alumnos[idx] = alumnoActualizado;
     this.saveAlumnos(alumnos);
+    this.addPendingSyncAlumnoId(alumnoActualizado.id_alumno);
 
     this.addAuditLog(
       usuarioOperador,
@@ -590,67 +610,57 @@ export class StorageService {
   }
 
   static getProfesores(): Profesor[] {
-    const raw = localStorage.getItem(KEY_PROFESORES);
-    if (!raw) {
-      this.saveProfesores(PROFESORES_INICIALES);
-      return PROFESORES_INICIALES;
-    }
-    try {
-      const parsed: Profesor[] = JSON.parse(raw);
-      const excludedEmails = new Set([
-        'pepe@g.educaand.es',
-        'carmen.luque@g.educaand.es',
-        'rafael.martinez@g.educaand.es',
-        'elena.castillo@g.educaand.es'
-      ]);
-      const excludedIds = new Set(['prof-pepe', 'prof-02', 'prof-03', 'prof-04']);
+    const parsed: Profesor[] = [...memoryProfesores];
+    const excludedEmails = new Set([
+      'pepe@g.educaand.es',
+      'carmen.luque@g.educaand.es',
+      'rafael.martinez@g.educaand.es',
+      'elena.castillo@g.educaand.es'
+    ]);
+    const excludedIds = new Set(['prof-pepe', 'prof-02', 'prof-03', 'prof-04']);
 
-      // Filtrar y eliminar permanentemente a los docentes solicitados
-      const filtered = parsed.filter(p => 
-        !excludedEmails.has(p.email.toLowerCase().trim()) && 
-        !excludedIds.has(p.id_profesor)
-      );
+    const filtered = parsed.filter(p => 
+      p && p.email &&
+      !excludedEmails.has(p.email.toLowerCase().trim()) && 
+      !excludedIds.has(p.id_profesor)
+    );
 
-      let adminFound = false;
-      const mapped = filtered.map(p => {
-        const normalizedRol: RoleUsuario = p.rol === 'ROLE_CONVIVENCIA_ADMIN' ? 'ROLE_CONVIVENCIA_ADMIN' : 'ROLE_DOCENTE';
-        if (p.email.toLowerCase() === 'mgonruz857@g.educaand.es') {
-          adminFound = true;
-          return {
-            ...p,
-            nombre: 'Miguel Ángel',
-            apellidos: 'González Ruz',
-            rol: 'ROLE_CONVIVENCIA_ADMIN' as const,
-            estado: 'ACTIVO' as const,
-          };
-        }
+    let adminFound = false;
+    const mapped = filtered.map(p => {
+      const normalizedRol: RoleUsuario = p.rol === 'ROLE_CONVIVENCIA_ADMIN' ? 'ROLE_CONVIVENCIA_ADMIN' : 'ROLE_DOCENTE';
+      if (p.email.toLowerCase() === 'mgonruz857@g.educaand.es') {
+        adminFound = true;
         return {
           ...p,
-          rol: normalizedRol,
-          estado: p.estado || 'ACTIVO'
+          nombre: 'Miguel Ángel',
+          apellidos: 'González Ruz',
+          rol: 'ROLE_CONVIVENCIA_ADMIN' as const,
+          estado: 'ACTIVO' as const,
         };
+      }
+      return {
+        ...p,
+        rol: normalizedRol,
+        estado: p.estado || 'ACTIVO'
+      };
+    });
+
+    if (!adminFound) {
+      mapped.unshift({
+        ...PROFESORES_INICIALES[0],
+        estado: 'ACTIVO',
       });
-
-      if (!adminFound) {
-        mapped.unshift({
-          ...PROFESORES_INICIALES[0],
-          estado: 'ACTIVO',
-        });
-      }
-
-      // Si hubo docentes excluidos de la lista previa, persistir lista limpia
-      if (filtered.length !== parsed.length) {
-        this.saveProfesores(mapped);
-      }
-
-      return mapped;
-    } catch {
-      return PROFESORES_INICIALES;
     }
+
+    if (filtered.length !== parsed.length) {
+      memoryProfesores = [...mapped];
+    }
+
+    return mapped;
   }
 
   static saveProfesores(profesores: Profesor[]): void {
-    localStorage.setItem(KEY_PROFESORES, JSON.stringify(profesores));
+    memoryProfesores = [...profesores];
     this.touchLocalWriteTimestamp();
   }
 
@@ -680,6 +690,7 @@ export class StorageService {
 
     profesores[profIndex] = updatedProf;
     this.saveProfesores(profesores);
+    this.addPendingSyncProfesorEmail(updatedProf.email);
 
     this.addAuditLog(
       usuarioOperador,
@@ -711,6 +722,7 @@ export class StorageService {
 
     profesores[profIndex] = updatedProf;
     this.saveProfesores(profesores);
+    this.addPendingSyncProfesorEmail(updatedProf.email);
 
     this.addAuditLog(
       usuarioOperador,
@@ -731,6 +743,10 @@ export class StorageService {
     const activos = profesores.filter(p => p.estado !== 'INACTIVO');
 
     if (inactivos.length > 0) {
+      inactivos.forEach(p => {
+        if (p.id_profesor) this.addDeletedProfesorId(p.id_profesor);
+        if (p.email) this.addDeletedProfesorId(p.email.toLowerCase().trim());
+      });
       this.saveProfesores(activos);
       this.addAuditLog(
         usuarioOperador,
@@ -761,6 +777,8 @@ export class StorageService {
       return { success: false, error: 'No es posible eliminar al Administrador Principal de Convivencia.' };
     }
 
+    if (prof.id_profesor) this.addDeletedProfesorId(prof.id_profesor);
+    if (prof.email) this.addDeletedProfesorId(prof.email.toLowerCase().trim());
     profesores.splice(profIndex, 1);
     this.saveProfesores(profesores);
 
@@ -804,6 +822,7 @@ export class StorageService {
 
     profesores.push(nuevoProfesor);
     this.saveProfesores(profesores);
+    this.addPendingSyncProfesorEmail(nuevoProfesor.email);
 
     this.addAuditLog(
       usuarioOperador,
@@ -870,6 +889,7 @@ export class StorageService {
 
     profesores[profIndex] = profesorActualizado;
     this.saveProfesores(profesores);
+    this.addPendingSyncProfesorEmail(profesorActualizado.email);
 
     // Actualizar la sesión activa si se ha editado el usuario actualmente autenticado
     try {
@@ -935,6 +955,7 @@ export class StorageService {
 
     profesores[profIndex] = profesorActualizado;
     this.saveProfesores(profesores);
+    this.addPendingSyncProfesorEmail(profesorActualizado.email);
 
     // Actualizar la sesión activa en cliente
     try {
@@ -1093,38 +1114,22 @@ export class StorageService {
   }
 
   static getSanciones(): Sancion[] {
-    const raw = localStorage.getItem(KEY_SANCIONES);
-    if (!raw) {
-      this.saveSanciones(SANCIONES_INICIALES);
-      return SANCIONES_INICIALES;
-    }
-    try {
-      const parsed: Sancion[] = JSON.parse(raw);
-      return this.deduplicarSancionesPorExpediente(parsed);
-    } catch {
-      return SANCIONES_INICIALES;
-    }
+    return this.deduplicarSancionesPorExpediente([...memorySanciones]);
   }
 
   static saveSanciones(sanciones: Sancion[]): void {
     const deduped = this.deduplicarSancionesPorExpediente(sanciones);
-    localStorage.setItem(KEY_SANCIONES, JSON.stringify(deduped));
+    memorySanciones = [...deduped];
     this.touchLocalWriteTimestamp();
   }
 
   // --- RECONCILIACIÓN Y REGISTRO DE ELEMENTOS ELIMINADOS (TOMBSTONES) ---
   static getDeletedSancionIds(): string[] {
-    try {
-      const raw = localStorage.getItem(KEY_DELETED_SANCIONES);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+    return [...memoryDeletedSanciones];
   }
 
   static saveDeletedSancionIds(ids: string[]): void {
-    const unique = Array.from(new Set(ids)).slice(-500);
-    localStorage.setItem(KEY_DELETED_SANCIONES, JSON.stringify(unique));
+    memoryDeletedSanciones = Array.from(new Set(ids)).slice(-500);
   }
 
   static addDeletedSancionId(id: string): void {
@@ -1143,16 +1148,11 @@ export class StorageService {
   }
 
   static getPendingSyncSancionIds(): string[] {
-    try {
-      const raw = localStorage.getItem(KEY_PENDING_SYNC_SANCIONES);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+    return [...memoryPendingSyncSanciones];
   }
 
   static savePendingSyncSancionIds(ids: string[]): void {
-    localStorage.setItem(KEY_PENDING_SYNC_SANCIONES, JSON.stringify(Array.from(new Set(ids))));
+    memoryPendingSyncSanciones = Array.from(new Set(ids));
   }
 
   static addPendingSyncSancionId(id: string): void {
@@ -1171,7 +1171,7 @@ export class StorageService {
 
   static clearPendingSyncSancionIds(idsToRemove?: string[]): void {
     if (!idsToRemove || idsToRemove.length === 0) {
-      localStorage.removeItem(KEY_PENDING_SYNC_SANCIONES);
+      memoryPendingSyncSanciones = [];
     } else {
       const set = new Set(idsToRemove);
       const remaining = this.getPendingSyncSancionIds().filter(i => !set.has(i));
@@ -1179,17 +1179,43 @@ export class StorageService {
     }
   }
 
-  static getDeletedAlumnoIds(): string[] {
-    try {
-      const raw = localStorage.getItem(KEY_DELETED_ALUMNOS);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
+  static getPendingSyncProfesorEmails(): string[] {
+    return [...memoryPendingSyncProfesores];
+  }
+
+  static addPendingSyncProfesorEmail(email: string): void {
+    if (!email) return;
+    const clean = email.toLowerCase().trim();
+    if (!memoryPendingSyncProfesores.includes(clean)) {
+      memoryPendingSyncProfesores.push(clean);
     }
   }
 
+  static clearPendingSyncProfesorEmails(): void {
+    memoryPendingSyncProfesores = [];
+  }
+
+  static getPendingSyncAlumnoIds(): string[] {
+    return [...memoryPendingSyncAlumnos];
+  }
+
+  static addPendingSyncAlumnoId(id: string): void {
+    if (!id) return;
+    if (!memoryPendingSyncAlumnos.includes(id)) {
+      memoryPendingSyncAlumnos.push(id);
+    }
+  }
+
+  static clearPendingSyncAlumnoIds(): void {
+    memoryPendingSyncAlumnos = [];
+  }
+
+  static getDeletedAlumnoIds(): string[] {
+    return [...memoryDeletedAlumnos];
+  }
+
   static saveDeletedAlumnoIds(ids: string[]): void {
-    localStorage.setItem(KEY_DELETED_ALUMNOS, JSON.stringify(Array.from(new Set(ids)).slice(-500)));
+    memoryDeletedAlumnos = Array.from(new Set(ids)).slice(-500);
   }
 
   static addDeletedAlumnoId(id: string): void {
@@ -1202,16 +1228,11 @@ export class StorageService {
   }
 
   static getDeletedProfesorIds(): string[] {
-    try {
-      const raw = localStorage.getItem(KEY_DELETED_PROFESORES);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
+    return [...memoryDeletedProfesores];
   }
 
   static saveDeletedProfesorIds(ids: string[]): void {
-    localStorage.setItem(KEY_DELETED_PROFESORES, JSON.stringify(Array.from(new Set(ids)).slice(-200)));
+    memoryDeletedProfesores = Array.from(new Set(ids)).slice(-200);
   }
 
   static addDeletedProfesorId(id: string): void {
@@ -1224,38 +1245,20 @@ export class StorageService {
   }
 
   static getCompensaciones(): Compensacion[] {
-    const raw = localStorage.getItem(KEY_COMPENSACIONES);
-    if (!raw) {
-      this.saveCompensaciones(COMPENSACIONES_INICIALES);
-      return COMPENSACIONES_INICIALES;
-    }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return COMPENSACIONES_INICIALES;
-    }
+    return [...memoryCompensaciones];
   }
 
   static saveCompensaciones(comps: Compensacion[]): void {
-    localStorage.setItem(KEY_COMPENSACIONES, JSON.stringify(comps));
+    memoryCompensaciones = [...comps];
     this.touchLocalWriteTimestamp();
   }
 
   static getAuditLogs(): AuditLog[] {
-    const raw = localStorage.getItem(KEY_AUDIT_LOGS);
-    if (!raw) {
-      this.saveAuditLogs(AUDIT_LOGS_INICIALES);
-      return AUDIT_LOGS_INICIALES;
-    }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return AUDIT_LOGS_INICIALES;
-    }
+    return [...memoryAuditLogs];
   }
 
   static saveAuditLogs(logs: AuditLog[]): void {
-    localStorage.setItem(KEY_AUDIT_LOGS, JSON.stringify(logs));
+    memoryAuditLogs = [...logs];
   }
 
   static addAuditLog(usuarioEmail: string, accion: AuditLog['accion'], entidad: string, detalles: string): void {
@@ -1270,24 +1273,15 @@ export class StorageService {
       hash_integridad: `sha256-${Math.random().toString(36).substring(2, 10)}${Date.now().toString(16)}`,
     };
     logs.unshift(newLog);
-    this.saveAuditLogs(logs.slice(0, 200)); // retain last 200 entries
+    this.saveAuditLogs(logs.slice(0, 300)); // retain last 300 entries
   }
 
   static getMovimientos(): MovimientoPuntos[] {
-    const raw = localStorage.getItem(KEY_MOVIMIENTOS);
-    if (!raw) {
-      this.saveMovimientos(MOVIMIENTOS_INICIALES);
-      return MOVIMIENTOS_INICIALES;
-    }
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return MOVIMIENTOS_INICIALES;
-    }
+    return [...memoryMovimientos];
   }
 
   static saveMovimientos(movs: MovimientoPuntos[]): void {
-    localStorage.setItem(KEY_MOVIMIENTOS, JSON.stringify(movs));
+    memoryMovimientos = [...movs];
     this.touchLocalWriteTimestamp();
   }
 
@@ -2070,6 +2064,7 @@ export class StorageService {
       observaciones_tramitacion: observaciones,
     };
     this.saveSanciones(sanciones);
+    this.addPendingSyncSancionId(idSancion);
 
     this.addAuditLog(
       usuarioEmail,
@@ -2099,6 +2094,7 @@ export class StorageService {
       hora_llegada_pac: sanciones[index].hora_llegada_pac || nowTime,
     };
     this.saveSanciones(sanciones);
+    this.addPendingSyncSancionId(idSancion);
 
     this.addAuditLog(
       usuarioEmail,

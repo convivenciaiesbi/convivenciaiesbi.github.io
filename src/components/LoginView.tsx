@@ -63,9 +63,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   }, []);
 
-  // Al montar la pantalla de login (en cualquier dispositivo nuevo), sincronizar inmediatamente desde Drive con recarga limpia
+  // Al montar la pantalla de login (en cualquier dispositivo nuevo), limpiar caché local y sincronizar inmediatamente desde Drive
   useEffect(() => {
     let isMounted = true;
+    StorageService.clearMemoryCacheForFreshLogin();
     GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true }).then((res) => {
       if (isMounted) {
         setIsDriveSyncing(false);
@@ -214,28 +215,31 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       }
     }
 
+    setIsLoading(true);
+    setAuthStage('Descargando datos actualizados desde Google Drive...');
+
+    // SIEMPRE descargar el estado en tiempo real desde Google Drive antes de iniciar sesión
+    // para que ningún usuario vea jamás datos de caché local al entrar desde cualquier dispositivo.
+    try {
+      await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true, skipAutoPush: !effectiveSetupRequired });
+      setSyncVersion((v) => v + 1);
+    } catch {
+      // Continuar con estado en memoria si hay corte de red puntual
+    }
+
     setAuthStage(effectiveSetupRequired ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
 
     // Iniciar sesión
     let res = AuthService.login(cleanEmail, password, isSharedDevice);
 
-    // Si no coincide y no requería configuración, intentar una descarga forzada de Drive
-    // por si Jefatura le asignó una nueva clave manual desde otro ordenador
-    if (!res.success && !effectiveSetupRequired) {
-      try {
-        setAuthStage('Consultando actualización de credencial en Google Drive...');
-        await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
-        res = AuthService.login(cleanEmail, password, isSharedDevice);
-      } catch {
-        // Fallback local
-      }
-    }
-
     if (res.success && res.user) {
-      // Sincronizar en segundo plano con Drive
-      GoogleDriveSyncService.pushToGoogleDrive().catch((e) => {
-        console.warn('Sincronización en segundo plano con Drive:', e);
-      });
+      // Solo subir a Google Drive si se acaba de registrar o cambiar la contraseña por primera vez;
+      // en inicios de sesión ordinarios NUNCA empujar caché local hacia Drive.
+      if (effectiveSetupRequired) {
+        GoogleDriveSyncService.pushToGoogleDrive().catch((e) => {
+          console.warn('Sincronización de nueva credencial con Drive:', e);
+        });
+      }
 
       setIsLoading(false);
       setAuthStage(null);

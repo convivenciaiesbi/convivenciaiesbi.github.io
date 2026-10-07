@@ -203,9 +203,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* ========================================================================= */}
           <div className="flex items-center gap-2">
             
-            {/* Friendly Drive Storage indicator button: visible para administración y enlaces directos */}
-            {isAdmin && (
-              <div className="flex items-center gap-1">
+            {/* Friendly Drive Storage indicator button: visible para administración y botón de refresco en vivo para todos */}
+            <div className="flex items-center gap-1">
+              {isAdmin && (
                 <button
                   onClick={onOpenDriveModal}
                   title="Almacenamiento y sincronización en Google Drive (@g.educaand.es)"
@@ -226,27 +226,28 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                   )}
                 </button>
+              )}
 
-                {onManualSync && (
-                  <button
-                    type="button"
-                    disabled={isSyncingNow}
-                    onClick={async () => {
-                      setIsSyncingNow(true);
-                      try {
-                        await onManualSync();
-                      } finally {
-                        setTimeout(() => setIsSyncingNow(false), 600);
-                      }
-                    }}
-                    title="Sincronizar inmediatamente con Google Drive y actualizar datos"
-                    className="p-1.5 text-slate-600 hover:text-sky-800 bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 rounded-xl transition-all cursor-pointer shadow-2xs"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNow ? 'animate-spin text-sky-600' : ''}`} />
-                  </button>
-                )}
-              </div>
-            )}
+              {onManualSync && (
+                <button
+                  type="button"
+                  disabled={isSyncingNow}
+                  onClick={async () => {
+                    setIsSyncingNow(true);
+                    try {
+                      await onManualSync();
+                    } finally {
+                      setTimeout(() => setIsSyncingNow(false), 600);
+                    }
+                  }}
+                  title="Refrescar datos en tiempo real desde la base de datos de Google Drive (sin caché)"
+                  className="flex items-center gap-1 px-2 py-1.5 text-xs font-semibold text-slate-600 hover:text-sky-800 bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 rounded-xl transition-all cursor-pointer shadow-2xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNow ? 'animate-spin text-sky-600' : ''}`} />
+                  <span className="hidden xl:inline text-[11px]">Actualizar</span>
+                </button>
+              )}
+            </div>
 
             {/* Friendly Security & RGPD Audit button: solo visible para profesorado administrador */}
             {isAdmin && onOpenSecurityModal && (

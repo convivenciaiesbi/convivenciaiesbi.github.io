@@ -175,8 +175,9 @@ export default function App() {
       }
     } catch {}
 
-    // 1. Sincronización inmediata al arrancar (fuerza carga completa para recuperar cualquier parte existente)
-    const syncFromDrive = (force = false) => {
+    // 1. Sincronización inmediata al arrancar (fuerza carga completa desde Google Drive sin caché)
+    const syncFromDrive = (force = true) => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: force })
         .then((res) => {
           if (res.success) {
@@ -188,13 +189,13 @@ export default function App() {
 
     syncFromDrive(true);
 
-    // 2. Sincronización automática periódica de alta frecuencia (cada 5 segundos) para inmediatez entre aulas
-    const intervalId = setInterval(syncFromDrive, 5000);
+    // 2. Sincronización automática periódica de alta frecuencia (cada 3 segundos) para tiempo real absoluto entre dispositivos
+    const intervalId = setInterval(() => syncFromDrive(true), 3000);
 
     // 3. Sincronización inmediata cuando la pestaña recupera el foco, cambia la visibilidad o vuelve la conexión
     const handleQuickSync = () => {
-      refreshAllData();
-      syncFromDrive();
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      syncFromDrive(true);
     };
     window.addEventListener('focus', handleQuickSync);
     window.addEventListener('visibilitychange', handleQuickSync);
@@ -233,27 +234,44 @@ export default function App() {
   }, [alumnos]);
 
   const handleLoginSuccess = (user: Profesor) => {
+    refreshAllData();
     setCurrentUser(user);
     if (AuthService.isAdmin(user)) {
       setCurrentView('feed');
     } else {
       setCurrentView('imponer');
     }
+    // Refrescar inmediatamente desde Google Drive tras el inicio de sesión
+    GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
+      .then((res) => {
+        if (res.success) {
+          refreshAllData();
+        }
+      })
+      .catch(() => {});
   };
 
   const handleLogout = (reason: 'MANUAL' | 'INACTIVITY' = 'MANUAL') => {
     AuthService.logout(reason);
+    StorageService.clearMemoryCacheForFreshLogin();
     setCurrentUser(null);
     setInactivityWarningSeconds(null);
   };
 
-  // Safe navigation handler enforcing role access
+  // Safe navigation handler enforcing role access and triggering immediate fresh data pull
   const handleNavigate = (view: string) => {
     if (!AuthService.isViewAllowed(currentUser, view)) {
       setCurrentView('imponer');
       return;
     }
     setCurrentView(view);
+    GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
+      .then((res) => {
+        if (res.success) {
+          refreshAllData();
+        }
+      })
+      .catch(() => {});
   };
 
   const notifyLocalSync = () => {
@@ -367,7 +385,7 @@ export default function App() {
         profesoresDisponibles={profesores.length > 0 ? profesores.filter(p => p.estado !== 'INACTIVO') : PROFESORES_INICIALES}
         pendingSyncCount={0}
         onManualSync={async () => {
-          const res = await GoogleDriveSyncService.pullFromGoogleDrive();
+          const res = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
           if (res.success) {
             refreshAllData();
           }
@@ -496,7 +514,11 @@ export default function App() {
               setCurrentView('imponer');
             }}
             onPrintParte={(sancion) => setPrintableParte(sancion)}
-            onDataChanged={refreshAllData}
+            onDataChanged={() => {
+              refreshAllData();
+              notifyLocalSync();
+              GoogleDriveSyncService.triggerFastSync(150);
+            }}
             onDeleteParte={handleDeleteParte}
             onEditParte={handleEditParte}
           />
@@ -514,7 +536,7 @@ export default function App() {
             onDeleteParte={handleDeleteParte}
             onEditParte={handleEditParte}
             onManualSync={async () => {
-              const res = await GoogleDriveSyncService.pullFromGoogleDrive();
+              const res = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
               if (res.success) {
                 refreshAllData();
               }
@@ -549,7 +571,11 @@ export default function App() {
         {isAdmin && currentView === 'etl' && (
           <EtlImportView
             currentUser={currentUser}
-            onImportCompleted={refreshAllData}
+            onImportCompleted={() => {
+              refreshAllData();
+              notifyLocalSync();
+              GoogleDriveSyncService.triggerFastSync(150);
+            }}
             auditLogs={auditLogs}
             profesores={profesores}
             alumnos={alumnos}

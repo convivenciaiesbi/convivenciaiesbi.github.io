@@ -155,18 +155,18 @@ export class GoogleDriveSyncService {
     try {
       const controller = new AbortController();
       // Timeout ágil para no bloquear la interfaz en redes lentas
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const localSancionesCount = StorageService.getSanciones().length;
-      const localAlumnosCount = StorageService.getAlumnos().length;
-      const shouldForceFull = options?.forceRefresh || localSancionesCount === 0 || localAlumnosCount === 0;
-
-      const lastSync = shouldForceFull ? '' : (this.getLastSyncTimestamp() || '');
-      const url = `${apiUrl}?action=read_database${lastSync ? `&since=${encodeURIComponent(lastSync)}` : ''}&t=${Date.now()}`;
+      // SIEMPRE forzar lectura fresca desde Google Drive sin depender de timestamps en caché local
+      // para asegurar que todos los dispositivos vean exactamente el mismo estado en tiempo real.
+      const url = `${apiUrl}?action=read_database&t=${Date.now()}&r=${Math.random().toString(36).substring(2, 8)}`;
 
       const response = await fetch(url, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        cache: 'no-store',
+        headers: {
+          'Accept': 'application/json',
+        },
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
@@ -200,20 +200,6 @@ export class GoogleDriveSyncService {
         throw new Error('Respuesta inválida del servidor de Google Drive: formato no reconocido.');
       }
 
-      // Si el servidor indica que los datos no han cambiado y tenemos datos locales cargados
-      if (!shouldForceFull && remoteData && remoteData.not_modified === true) {
-        return {
-          success: true,
-          notModified: true,
-          message: 'Base de datos al día (sin cambios remotos).',
-          dataCount: {
-            profesores: StorageService.getProfesores().length,
-            alumnos: StorageService.getAlumnos().length,
-            sanciones: StorageService.getSanciones().length,
-          }
-        };
-      }
-
       this.lastRemoteTimestamp = remoteData.timestamp || new Date().toISOString();
 
       let localHasPendingData = false;
@@ -222,18 +208,16 @@ export class GoogleDriveSyncService {
       const remoteDeletedSanciones = new Set<string>(remoteData.deleted_sanciones || []);
       const localDeletedSanciones = new Set<string>(StorageService.getDeletedSancionIds());
       const pendingSyncSancionIds = new Set<string>(StorageService.getPendingSyncSancionIds());
+      const pendingSyncProfEmails = new Set<string>(StorageService.getPendingSyncProfesorEmails());
+      const pendingSyncAlumnoIds = new Set<string>(StorageService.getPendingSyncAlumnoIds());
 
-      // Solo mantener tombstones que estén en el servidor o que acaben de ser eliminados en este dispositivo
-      const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones]);
-      localDeletedSanciones.forEach(id => {
-        // Si no está activo en la lista oficial de sanciones del servidor, conservar el tombstone
-        allDeletedSanciones.add(id);
-      });
+      // Solo mantener tombstones que estén en el servidor o que acaben de ser eliminados en esta sesión
+      const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones, ...localDeletedSanciones]);
 
-      // Si vienen sanciones en remoteData.sanciones, esas sanciones son ACTIVAS en el archivo JSON de Drive y NUNCA deben descartarse por tombstones locales antiguos
+      // Si vienen sanciones en remoteData.sanciones y NO acaban de ser eliminadas en esta sesión, son ACTIVAS en Drive
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
         remoteData.sanciones.forEach((s: Sancion) => {
-          if (s?.id_sancion) {
+          if (s?.id_sancion && !localDeletedSanciones.has(s.id_sancion)) {
             allDeletedSanciones.delete(s.id_sancion);
             StorageService.removeDeletedSancionId(s.id_sancion);
           }
@@ -246,7 +230,7 @@ export class GoogleDriveSyncService {
       const allDeletedAlumnos = new Set<string>([...remoteDeletedAlumnos, ...localDeletedAlumnos]);
       if (remoteData.alumnos && Array.isArray(remoteData.alumnos)) {
         remoteData.alumnos.forEach((a: Alumno) => {
-          if (a?.id_alumno) {
+          if (a?.id_alumno && !localDeletedAlumnos.has(a.id_alumno)) {
             allDeletedAlumnos.delete(a.id_alumno);
           }
         });
@@ -264,7 +248,7 @@ export class GoogleDriveSyncService {
       const allResets = new Set<string>([...remoteResets, ...localResets]);
       AuthService.saveResetCredentialsEmails(Array.from(allResets));
 
-      // 1. Fusión de Profesores (Unión por id o email respetando eliminados)
+      // 1. Fusión de Profesores (Drive es la fuente de verdad; solo sobrescribir si hay cambio en vuelo en esta sesión)
       if (remoteData.profesores && Array.isArray(remoteData.profesores)) {
         const localProfs = StorageService.getProfesores();
         const profMap = new Map<string, Profesor>();
@@ -273,13 +257,11 @@ export class GoogleDriveSyncService {
             const cleanEm = p.email.toLowerCase().trim();
             profMap.set(cleanEm, p);
 
-            // Si el docente viene con reseteo de clave o indicación de cambio obligatorio
             if (allResets.has(cleanEm) || p.requiere_cambio_clave) {
               p.requiere_cambio_clave = true;
               p.password_hash = undefined;
               AuthService.removeTeacherHashDirect(cleanEm);
             } else if (p.password_hash) {
-              // Si el docente viene con su contraseña criptográfica activa desde Drive, sincronizarla al instante
               AuthService.setTeacherHashDirect(p.email, p.password_hash);
             }
           }
@@ -289,10 +271,19 @@ export class GoogleDriveSyncService {
             const k = lp.email.toLowerCase().trim();
             const existing = profMap.get(k);
             if (!existing) {
-              profMap.set(k, lp);
+              if (pendingSyncProfEmails.has(k)) {
+                profMap.set(k, lp);
+                localHasPendingData = true;
+              }
+            } else if (pendingSyncProfEmails.has(k)) {
+              // El usuario acaba de editar este profesor en esta sesión activa
+              profMap.set(k, {
+                ...existing,
+                ...lp,
+                password_hash: lp.password_hash || existing.password_hash,
+              });
               localHasPendingData = true;
             } else {
-              // Si está marcado para reseteo o cambio obligatorio, NUNCA resucitar el hash viejo local
               if (allResets.has(k) || existing.requiere_cambio_clave) {
                 existing.requiere_cambio_clave = true;
                 existing.password_hash = undefined;
@@ -312,51 +303,31 @@ export class GoogleDriveSyncService {
         AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores, Array.from(allResets));
       }
 
-      // 3. Fusión de Sanciones (preservando el 100% de las sanciones activas en el JSON de Drive)
+      // 3. Fusión de Sanciones (Google Drive es la única fuente de verdad salvo ediciones en vuelo en esta sesión)
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
         const localSanciones = StorageService.getSanciones();
         const sancionMap = new Map<string, Sancion>();
 
-        // Cargar todas las sanciones que están en el JSON remoto de Drive
+        // Cargar todas las sanciones activas del JSON remoto de Drive (excluyendo las recién eliminadas en esta sesión)
         remoteData.sanciones.forEach((s: Sancion) => {
-          if (s?.id_sancion) {
+          if (s?.id_sancion && !localDeletedSanciones.has(s.id_sancion)) {
             sancionMap.set(s.id_sancion, s);
           }
         });
 
-        // Reconciliar locales
+        // Aplicar únicamente las creaciones o modificaciones pendientes en vuelo de esta sesión
         localSanciones.forEach(localS => {
           if (!localS?.id_sancion) return;
+          if (allDeletedSanciones.has(localS.id_sancion)) return;
 
-          // Si el parte fue eliminado y no está en Drive, descartarlo
-          if (allDeletedSanciones.has(localS.id_sancion) && !sancionMap.has(localS.id_sancion)) {
-            return;
-          }
-
-          const existingRemote = sancionMap.get(localS.id_sancion);
-          if (existingRemote) {
-            // Existe en ambos: fusionar el estado más reciente (por ejemplo, cambios de tramitación)
-            const localTime = new Date(localS.timestamp || localS.fecha || 0).getTime();
-            const remoteTime = new Date(existingRemote.timestamp || existingRemote.fecha || 0).getTime();
-            if (localTime >= remoteTime) {
-              sancionMap.set(localS.id_sancion, { ...existingRemote, ...localS });
-            }
-          } else {
-            // Existe localmente pero NO en el servidor:
-            // Solo conservar si es un parte recién creado/restaurado en este equipo pendiente de subir,
-            // o si el archivo remoto estuviera completamente vacío por accidente
-            if (pendingSyncSancionIds.has(localS.id_sancion) && !remoteDeletedSanciones.has(localS.id_sancion)) {
-              sancionMap.set(localS.id_sancion, localS);
-              localHasPendingData = true;
-            } else if (remoteData.sanciones.length === 0 && localSanciones.length > 0 && !remoteDeletedSanciones.has(localS.id_sancion)) {
-              sancionMap.set(localS.id_sancion, localS);
-              localHasPendingData = true;
-            }
+          if (pendingSyncSancionIds.has(localS.id_sancion)) {
+            const existingRemote = sancionMap.get(localS.id_sancion);
+            sancionMap.set(localS.id_sancion, existingRemote ? { ...existingRemote, ...localS } : localS);
+            localHasPendingData = true;
           }
         });
 
         const mergedSanciones = StorageService.deduplicarSancionesPorExpediente(Array.from(sancionMap.values()));
-
         StorageService.saveSanciones(mergedSanciones);
       }
 
@@ -376,7 +347,7 @@ export class GoogleDriveSyncService {
         StorageService.saveCompensaciones(Array.from(compMap.values()));
       }
 
-      // 5. Fusión de Alumnos y Recalculación Oficial de Saldos de Carnet
+      // 5. Fusión de Alumnos (Google Drive es la única fuente de verdad salvo ediciones en vuelo en esta sesión)
       if (remoteData.alumnos && Array.isArray(remoteData.alumnos)) {
         const localAlumnos = StorageService.getAlumnos();
         const alumnoMap = new Map<string, Alumno>();
@@ -390,30 +361,20 @@ export class GoogleDriveSyncService {
         localAlumnos.forEach(localA => {
           if (!localA?.id_alumno || allDeletedAlumnos.has(localA.id_alumno)) return;
 
-          const existingRemote = alumnoMap.get(localA.id_alumno);
-          if (!existingRemote) {
-            alumnoMap.set(localA.id_alumno, localA);
+          if (pendingSyncAlumnoIds.has(localA.id_alumno)) {
+            const existingRemote = alumnoMap.get(localA.id_alumno);
+            alumnoMap.set(localA.id_alumno, existingRemote ? { ...existingRemote, ...localA } : localA);
             localHasPendingData = true;
-          } else {
-            // Mantener datos fusionados de censo
-            alumnoMap.set(localA.id_alumno, {
-              ...existingRemote,
-              ...localA,
-              telefono_tutor: existingRemote.telefono_tutor || localA.telefono_tutor || '',
-              nombre_tutor: existingRemote.nombre_tutor || localA.nombre_tutor || '',
-              nie: existingRemote.nie || localA.nie || '',
-              grupo: existingRemote.grupo || localA.grupo,
-            });
           }
         });
 
         StorageService.saveAlumnos(Array.from(alumnoMap.values()));
-        // Depurar duplicados residuales si existieran
         StorageService.depurarAlumnosDuplicados('SISTEMA_SYNC');
       }
 
       // 6. Recálculo automático estricto de puntos de carnet tras sincronizar sanciones y compensaciones
       StorageService.recalcularPuntosAlumnos();
+      StorageService.markLoadedFromDrive();
 
       // 6. Fusión de Audit Logs
       if (remoteData.audit_logs && Array.isArray(remoteData.audit_logs)) {
@@ -512,6 +473,8 @@ export class GoogleDriveSyncService {
 
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
       StorageService.clearPendingSyncSancionIds();
+      StorageService.clearPendingSyncProfesorEmails();
+      StorageService.clearPendingSyncAlumnoIds();
       this.finishPush();
       return {
         success: true,
@@ -533,6 +496,8 @@ export class GoogleDriveSyncService {
       });
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
       StorageService.clearPendingSyncSancionIds();
+      StorageService.clearPendingSyncProfesorEmails();
+      StorageService.clearPendingSyncAlumnoIds();
       this.finishPush();
       return {
         success: true,

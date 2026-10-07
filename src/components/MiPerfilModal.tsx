@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Profesor, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
 import { StorageService } from '../services/storageService';
+import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
 
 interface MiPerfilModalProps {
   currentUser: Profesor;
@@ -94,9 +95,10 @@ export const MiPerfilModal: React.FC<MiPerfilModalProps> = ({
       setIsLoading(false);
 
       if (res.success && res.profesor) {
+        GoogleDriveSyncService.pushToGoogleDrive().catch(() => {});
         setFeedback({
           type: 'success',
-          message: '¡Tus datos de perfil docente han sido actualizados correctamente!'
+          message: '¡Tus datos de perfil docente han sido actualizados y sincronizados en Google Drive correctamente!'
         });
         onProfileUpdated(res.profesor);
         setTimeout(() => {
