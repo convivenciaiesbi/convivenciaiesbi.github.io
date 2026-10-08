@@ -3,7 +3,7 @@
  * casillas de trámites y generación del parte de sanción en PDF.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FileDown, Pencil, Trash2, Plus, X, Gavel, Circle } from 'lucide-react';
 import { Alumno, ExpedienteSancion, Profesor, ClaveTramiteSancion } from '../types/convivencia';
 import { StorageService } from '../services/storageService';
@@ -16,6 +16,9 @@ interface SancionesViewProps {
   alumnos: Alumno[];
   expedientes: ExpedienteSancion[];
   onDataChanged: () => void;
+  /** Si se llega desde un aviso de 0 puntos: abrir el formulario de ese alumno (o resaltar su expediente). */
+  abrirParaAlumno?: string | null;
+  onAbrirParaAlumnoAtendido?: () => void;
 }
 
 type Formulario = {
@@ -45,12 +48,36 @@ function fechaHoraCorta(iso?: string): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-export const SancionesView: React.FC<SancionesViewProps> = ({ currentUser, alumnos, expedientes, onDataChanged }) => {
+export const SancionesView: React.FC<SancionesViewProps> = ({
+  currentUser,
+  alumnos,
+  expedientes,
+  onDataChanged,
+  abrirParaAlumno,
+  onAbrirParaAlumnoAtendido,
+}) => {
   const [formulario, setFormulario] = useState<Formulario | null>(null);
   const [errorForm, setErrorForm] = useState<string | null>(null);
   const [aEliminar, setAEliminar] = useState<ExpedienteSancion | null>(null);
-  const [mostrarCompletados, setMostrarCompletados] = useState(false);
+  const [mostrarCompletados, setMostrarCompletados] = useState(true);
   const [generando, setGenerando] = useState<string | null>(null);
+
+  const [resaltado, setResaltado] = useState<string | null>(null);
+
+  // Llegada desde el aviso de 0 puntos
+  useEffect(() => {
+    if (!abrirParaAlumno) return;
+    const abierto = expedientes.find((e) => e.id_alumno === abrirParaAlumno && !e.completado);
+    if (abierto) {
+      setResaltado(abierto.id_expediente);
+      setTimeout(() => document.getElementById(`exp-${abierto.id_expediente}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+      setTimeout(() => setResaltado(null), 4000);
+    } else {
+      setErrorForm(null);
+      setFormulario(nuevoFormulario(abrirParaAlumno));
+    }
+    onAbrirParaAlumnoAtendido?.();
+  }, [abrirParaAlumno]);
 
   const alumnoPorId = useMemo(() => new Map(alumnos.map((a) => [a.id_alumno, a])), [alumnos]);
   const pendientes = useMemo(() => StorageService.getAlumnosPendientesDeExpediente(), [alumnos, expedientes]);
@@ -107,7 +134,7 @@ export const SancionesView: React.FC<SancionesViewProps> = ({ currentUser, alumn
     const hechos = TRAMITES_SANCION.filter((t) => exp.tramites[t.clave]?.hecho).length;
     const modalidad = MODALIDADES_SANCION.find((m) => m.valor === exp.modalidad)?.etiqueta;
     return (
-      <div key={exp.id_expediente} className={`border rounded-2xl p-4 space-y-3 ${exp.completado ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-amber-200'}`}>
+      <div key={exp.id_expediente} id={`exp-${exp.id_expediente}`} className={`border rounded-2xl p-4 space-y-3 transition-shadow ${exp.completado ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-amber-200'} ${resaltado === exp.id_expediente ? 'ring-4 ring-sky-300' : ''}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <div className="text-sm font-bold text-slate-900">
@@ -198,6 +225,9 @@ export const SancionesView: React.FC<SancionesViewProps> = ({ currentUser, alumn
             <AlertTriangle className="w-4 h-4" />
             {pendientes.length === 1 ? '1 alumno/a ha llegado a 0 puntos y no tiene expediente de sanción' : `${pendientes.length} alumnos/as han llegado a 0 puntos y no tienen expediente de sanción`}
           </div>
+          <p className="text-xs text-rose-800">
+            Pulse <strong>Abrir expediente</strong>, rellene los datos de la sanción y guarde: el expediente aparecerá en "En trámite" con las cuatro casillas de trámites.
+          </p>
           <ul className="divide-y divide-rose-100">
             {pendientes.map((a) => (
               <li key={a.id_alumno} className="flex items-center justify-between gap-2 py-2">

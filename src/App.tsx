@@ -136,6 +136,8 @@ export default function App() {
   const [compensaciones, setCompensaciones] = useState<Compensacion[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [expedientes, setExpedientes] = useState<ExpedienteSancion[]>([]);
+  // Alumno para el que abrir (o mostrar) el expediente al entrar en Sanciones desde un aviso
+  const [sancionParaAlumno, setSancionParaAlumno] = useState<string | null>(null);
 
   // Modals state
   const [printableParte, setPrintableParte] = useState<Sancion | null>(null);
@@ -517,6 +519,19 @@ export default function App() {
               <span>Ver en Carnet</span>
               <span>&rarr;</span>
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                const sinExpediente = StorageService.getAlumnosPendientesDeExpediente();
+                setSancionParaAlumno(sinExpediente.length === 1 ? sinExpediente[0].id_alumno : (alumnosConCeroPuntos.length === 1 ? alumnosConCeroPuntos[0].id_alumno : null));
+                setCurrentView('sanciones');
+              }}
+              className="bg-amber-300 text-rose-950 font-bold px-2.5 py-1 rounded-lg text-xs hover:bg-amber-200 transition-colors shadow-2xs cursor-pointer ml-2 shrink-0 inline-flex items-center gap-1 active:scale-98"
+              title="Ir a Sanciones para abrir el expediente y marcar los trámites"
+            >
+              <span>{alumnosConCeroPuntos.length === 1 ? 'Abrir expediente de sanción' : 'Ir a Sanciones'}</span>
+              <span>&rarr;</span>
+            </button>
           </div>
           <button
             type="button"
@@ -599,6 +614,8 @@ export default function App() {
             currentUser={currentUser}
             alumnos={alumnos}
             expedientes={expedientes}
+            abrirParaAlumno={sancionParaAlumno}
+            onAbrirParaAlumnoAtendido={() => setSancionParaAlumno(null)}
             onDataChanged={() => {
               refreshAllData();
               notifyLocalSync();
