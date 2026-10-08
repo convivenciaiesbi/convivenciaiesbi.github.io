@@ -4,30 +4,31 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  User, 
-  RefreshCw, 
-  ChevronDown, 
-  Check, 
-  LogOut, 
-  PlusCircle, 
-  Activity, 
-  CreditCard, 
-  BookOpen, 
-  BarChart3, 
-  Database, 
-  Cloud, 
-  Menu, 
-  X, 
-  Sparkles, 
-  School, 
+import {
+  User,
+  RefreshCw,
+  ChevronDown,
+  Check,
+  LogOut,
+  PlusCircle,
+  Activity,
+  CreditCard,
+  BookOpen,
+  BarChart3,
+  Database,
+  Cloud,
+  Menu,
+  X,
+  Sparkles,
+  School,
   Calendar,
   ShieldCheck,
   FileText,
   UserCog,
   GraduationCap,
   Users,
-  Laptop
+  Laptop,
+  Gavel
 } from 'lucide-react';
 import { Profesor } from '../types/convivencia';
 import { AuthService } from '../services/authService';
@@ -108,6 +109,10 @@ export const Header: React.FC<HeaderProps> = ({
         return <BarChart3 className="w-3.5 h-3.5 text-sky-600" />;
       case 'etl':
         return <Database className="w-3.5 h-3.5 text-sky-600" />;
+      case 'sanciones':
+        return <Gavel className="w-3.5 h-3.5 text-sky-600" />;
+      case 'tutoria':
+        return <Users className="w-3.5 h-3.5 text-sky-600" />;
       default:
         return <FileText className="w-3.5 h-3.5 text-sky-600" />;
     }
@@ -116,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs transition-all">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-3">
+        <div className="flex items-center justify-between min-h-16 py-1.5 gap-3 flex-wrap">
           
           {/* ========================================================================= */}
           {/* ZONE 1: Warm, friendly branding & School Identity */}
@@ -152,51 +157,6 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
           </div>
-
-          {/* ========================================================================= */}
-          {/* ZONE 2: Clean, intuitive navigation bar (Desktop) */}
-          {/* ========================================================================= */}
-          <nav className="hidden lg:flex items-center gap-1.5">
-            {navItems.map((item) => {
-              const isActive = currentView === item.id;
-              const isImponer = item.id === 'imponer';
-
-              // Friendly distinct treatment for "+ Nuevo Parte"
-              if (isImponer) {
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => onNavigate(item.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-98 ${
-                      isActive
-                        ? 'bg-sky-700 text-white ring-2 ring-sky-400 ring-offset-1'
-                        : 'bg-sky-600 hover:bg-sky-700 text-white hover:shadow-xs'
-                    }`}
-                    title={item.description}
-                  >
-                    <PlusCircle className="w-3.5 h-3.5 text-white" />
-                    <span>+ Nuevo Parte</span>
-                  </button>
-                );
-              }
-
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => onNavigate(item.id)}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
-                    isActive
-                      ? 'text-sky-950 bg-sky-100/90 font-bold border border-sky-200/80 shadow-2xs'
-                      : 'text-slate-600 hover:text-sky-900 hover:bg-slate-100/80'
-                  }`}
-                  title={item.description}
-                >
-                  {getViewIcon(item.id, false)}
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
 
           {/* ========================================================================= */}
           {/* ZONE 3: Friendly Actions & User Profile Area */}
@@ -465,6 +425,51 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
         </div>
+
+            {/* ========================================================================= */}
+            {/* ZONE 2: Clean, intuitive navigation bar (Desktop) */}
+            {/* ========================================================================= */}
+            <nav className="hidden lg:flex flex-wrap items-center justify-center gap-1.5 py-2 border-t border-slate-100">
+              {navItems.map((item) => {
+                const isActive = currentView === item.id;
+                const isImponer = item.id === 'imponer';
+
+                // Friendly distinct treatment for "+ Nuevo Parte"
+                if (isImponer) {
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => onNavigate(item.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer active:scale-98 ${
+                        isActive
+                          ? 'bg-sky-700 text-white ring-2 ring-sky-400 ring-offset-1'
+                          : 'bg-sky-600 hover:bg-sky-700 text-white hover:shadow-xs'
+                      }`}
+                      title={item.description}
+                    >
+                      <PlusCircle className="w-3.5 h-3.5 text-white" />
+                      <span>+ Nuevo Parte</span>
+                    </button>
+                  );
+                }
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                      isActive
+                        ? 'text-sky-950 bg-sky-100/90 font-bold border border-sky-200/80 shadow-2xs'
+                        : 'text-slate-600 hover:text-sky-900 hover:bg-slate-100/80'
+                    }`}
+                    title={item.description}
+                  >
+                    {getViewIcon(item.id, false)}
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
       </div>
 
       {/* ========================================================================= */}
