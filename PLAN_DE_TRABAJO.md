@@ -78,4 +78,6 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       "Marcar todos completados"; **parte de sanción en PDF** según el modelo del centro (sin recibí,
       con espacio para la firma de Dirección). Nombre de la directora en `src/config/centro.ts`.
       El tutor/a ve en Mi Tutoría las sanciones de su grupo y el estado de los trámites (solo lectura).
+      El PDF solo se puede generar con los 4 trámites marcados (decisión de Miguel Ángel). Acceso directo
+      desde el aviso rojo de 0 puntos ("Abrir expediente de sanción").
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.

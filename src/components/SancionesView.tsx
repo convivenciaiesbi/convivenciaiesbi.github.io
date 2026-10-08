@@ -179,9 +179,15 @@ export const SancionesView: React.FC<SancionesViewProps> = ({
           })}
         </ul>
 
+        {!exp.completado && (
+          <p className="text-[11px] text-slate-500">El parte de sanción en PDF se podrá generar cuando estén marcados los cuatro trámites.</p>
+        )}
+
         <div className="flex flex-wrap gap-2 pt-1">
-          <button type="button" onClick={() => generarPdf(exp)} disabled={generando === exp.id_expediente}
-            className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold cursor-pointer">
+          <button type="button" onClick={() => exp.completado && generarPdf(exp)}
+            disabled={!exp.completado || generando === exp.id_expediente}
+            title={exp.completado ? 'Descargar el parte de sanción' : 'Disponible cuando estén marcados los cuatro trámites'}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-300 disabled:text-slate-600 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold cursor-pointer">
             <FileDown className="w-3.5 h-3.5" /> {generando === exp.id_expediente ? 'Generando…' : 'Generar parte de sanción (PDF)'}
           </button>
           {!exp.completado && (
