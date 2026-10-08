@@ -33,7 +33,8 @@ import { AuditLog, Sancion, Alumno, UnidadInstitucionalConfig } from '../types/c
 import { StorageService } from '../services/storageService';
 import { AuthService } from '../services/authService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
-import { ESTRUCTURA_DRIVE_OFICIAL, generarGoogleAppsScriptCreacion, generarGoogleAppsScriptDatabaseBackend } from '../services/driveProvisioningService';
+import { ESTRUCTURA_DRIVE_OFICIAL, generarGoogleAppsScriptCreacion } from '../services/driveProvisioningService';
+import { generarServidorAppsScript } from '../services/appsScriptServidor';
 import iesLogo from '../assets/images/logo_rectangular_iesbi.png';
 import { CUENTA_DRIVE, CARPETA_DRIVE_ID, ARCHIVO_DB_DRIVE, PREFIJO_BACKUP, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
 
@@ -94,7 +95,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
   const [isSavingApiUrl, setIsSavingApiUrl] = useState(false);
 
   const handleCopyBackendScript = () => {
-    const code = generarGoogleAppsScriptDatabaseBackend(unidadConfig.email, unidadConfig.folderId || CARPETA_DRIVE_ID);
+    const code = generarServidorAppsScript();
     navigator.clipboard.writeText(code);
     setCopiedBackendScript(true);
     setTimeout(() => setCopiedBackendScript(false), 3000);
@@ -566,7 +567,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                 <span className="text-[11px] text-slate-500">Publicar como Aplicación Web</span>
               </div>
               <pre className="p-3 bg-slate-950 text-emerald-300 rounded-xl font-mono text-[10px] max-h-56 overflow-y-auto leading-relaxed border border-slate-800">
-                {generarGoogleAppsScriptDatabaseBackend(unidadConfig.email, unidadConfig.folderId)}
+                {generarServidorAppsScript()}
               </pre>
             </div>
           )}
@@ -706,9 +707,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                       if (incomingProfesores.length > 0) {
                         StorageService.saveProfesores(incomingProfesores);
                       }
-                      if (data?.credenciales_profesores && typeof data.credenciales_profesores === 'object') {
-                        AuthService.mergeRemoteCredentials(data.credenciales_profesores);
-                      }
+                      // Las contraseñas se gestionan solo en el servidor: no se restauran desde copias
                       if (incomingAlumnos.length > 0) {
                         StorageService.saveDeletedAlumnoIds([]);
                         StorageService.saveAlumnos(incomingAlumnos);

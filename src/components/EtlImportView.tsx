@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Upload, 
   FileSpreadsheet, 
@@ -124,7 +124,11 @@ export const EtlImportView: React.FC<EtlImportViewProps> = ({
 
   // Teacher password management state (restablecimiento y asignación manual por Jefatura)
   const [profesorParaGestionarClave, setProfesorParaGestionarClave] = useState<Profesor | null>(null);
-  const [nuevaClaveManual, setNuevaClaveManual] = useState<string>('');
+  // Qué docentes han activado su cuenta (según el servidor)
+  const [clavesActivadas, setClavesActivadas] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    AuthService.estadoClaves().then(setClavesActivadas).catch(() => {});
+  }, [profesores.length]);
   const [claveModalFeedback, setClaveModalFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Student management state in ETL (dar de baja, reactivar, alta manual, modificar)
@@ -602,67 +606,27 @@ El Amrani Youssef,4º ESO D`;
   // Abrir modal de gestión de contraseña de docente
   const handleAbrirGestionClave = (prof: Profesor) => {
     setProfesorParaGestionarClave(prof);
-    setNuevaClaveManual('');
     setClaveModalFeedback(null);
   };
 
-  // Restablecer contraseña para que el docente la defina en su próximo inicio de sesión
+  // Restablecer contraseña (en el servidor): el docente fijará una nueva en su próximo acceso
   const handleRestablecerClaveProfesor = async () => {
     if (!profesorParaGestionarClave) return;
-    const ok = AuthService.resetTeacherPassword(profesorParaGestionarClave.email, currentUser.email);
-    if (ok) {
+    const res = await AuthService.restablecerClave(profesorParaGestionarClave.email);
+    if (res.success) {
+      setClavesActivadas((prev) => (prev ? { ...prev, [profesorParaGestionarClave.email.toLowerCase().trim()]: false } : prev));
       setClaveModalFeedback({
         type: 'success',
-        text: `Contraseña restablecida con éxito para ${profesorParaGestionarClave.nombre} ${profesorParaGestionarClave.apellidos}. En su próximo acceso al sistema se le solicitará definir una nueva contraseña.`
+        text: `Contraseña restablecida para ${profesorParaGestionarClave.nombre} ${profesorParaGestionarClave.apellidos}. En su próximo acceso escribirá dos veces una nueva contraseña.`
       });
-      onImportCompleted();
-      // Sincronizar inmediatamente con Google Drive para que la revocación se propague a todos los dispositivos
-      try {
-        await GoogleDriveSyncService.pushToGoogleDrive();
-      } catch (e) {
-        console.warn('Error sincronizando cambio de contraseña en Drive:', e);
-      }
     } else {
       setClaveModalFeedback({
         type: 'error',
-        text: 'Error al restablecer la contraseña del docente.'
+        text: res.error || 'Error al restablecer la contraseña del docente.'
       });
     }
   };
 
-  // Asignar contraseña manual por Jefatura
-  const handleAsignarClaveManual = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!profesorParaGestionarClave) return;
-    if (!nuevaClaveManual.trim() || nuevaClaveManual.trim().length < 4) {
-      setClaveModalFeedback({
-        type: 'error',
-        text: 'La nueva contraseña debe tener al menos 4 caracteres.'
-      });
-      return;
-    }
-
-    const ok = AuthService.setTeacherPasswordDirect(profesorParaGestionarClave.email, nuevaClaveManual.trim(), currentUser.email);
-    if (ok) {
-      setClaveModalFeedback({
-        type: 'success',
-        text: `Nueva contraseña fijada con éxito para ${profesorParaGestionarClave.nombre} ${profesorParaGestionarClave.apellidos}. Ya puede acceder inmediatamente con esta clave.`
-      });
-      setNuevaClaveManual('');
-      onImportCompleted();
-      // Sincronizar inmediatamente con Google Drive para que la nueva clave esté disponible en todos los dispositivos
-      try {
-        await GoogleDriveSyncService.pushToGoogleDrive();
-      } catch (e) {
-        console.warn('Error sincronizando nueva clave en Drive:', e);
-      }
-    } else {
-      setClaveModalFeedback({
-        type: 'error',
-        text: 'Error al asignar la nueva contraseña.'
-      });
-    }
-  };
 
   // Abrir modal de edición de alumno en ETL
   const handleAbrirEditarAlumnoETL = (alm: Alumno) => {
@@ -1157,6 +1121,17 @@ El Amrani Youssef,4º ESO D`;
                             <div className="text-[11px] font-mono text-slate-500">
                               {prof.email}
                             </div>
+                            {clavesActivadas && isActivo && (
+                              clavesActivadas[prof.email.toLowerCase().trim()] ? (
+                                <div className="text-[10px] text-emerald-700 font-semibold mt-0.5" title="El docente ya ha fijado su contraseña">
+                                  ✓ Cuenta activada
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-amber-700 font-semibold mt-0.5" title="Aún no ha entrado nunca: fijará su contraseña en el primer acceso">
+                                  Pendiente de primer acceso
+                                </div>
+                              )
+                            )}
                             {!isActivo && prof.motivo_baja && (
                               <div className="text-[10px] text-rose-700 font-medium mt-0.5">
                                 Motivo baja: {prof.motivo_baja} ({prof.fecha_baja || ''})
@@ -1597,7 +1572,7 @@ El Amrani Youssef,4º ESO D`;
                     </div>
                     <div className="text-slate-500 pt-1 flex items-center justify-between">
                       <span>{profesorParaGestionarClave.departamento}</span>
-                      {AuthService.hasTeacherRegisteredPassword(profesorParaGestionarClave.email) ? (
+                      {clavesActivadas?.[profesorParaGestionarClave.email.toLowerCase().trim()] ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-200 px-2 py-0.5 rounded-full">
                           <CheckCircle2 className="w-3 h-3 text-emerald-700" />
                           Contraseña vinculada activa
@@ -1645,33 +1620,6 @@ El Amrani Youssef,4º ESO D`;
                       <span>Restablecer y solicitar nueva contraseña en próximo acceso</span>
                     </button>
                   </div>
-
-                  {/* Opción 2: Asignar Contraseña Manual Inmediata */}
-                  <form onSubmit={handleAsignarClaveManual} className="p-4 bg-sky-50/70 border border-sky-200 rounded-xl space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-bold text-sky-950">
-                      <Lock className="w-4 h-4 text-sky-700" />
-                      <span>Opción 2: Fijar contraseña temporal o personalizada directamente</span>
-                    </div>
-                    <p className="text-[11px] text-slate-600 leading-relaxed">
-                      Escriba a continuación la nueva clave que desea asignar a este docente para que pueda acceder de forma inmediata:
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={nuevaClaveManual}
-                        onChange={(e) => setNuevaClaveManual(e.target.value)}
-                        placeholder="Nueva contraseña (mínimo 4 caracteres)"
-                        className="grow px-3 py-2 text-xs font-mono border border-slate-300 rounded-xl bg-white focus:border-sky-600 focus:ring-1 focus:ring-sky-600"
-                      />
-                      <button
-                        type="submit"
-                        className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shrink-0 shadow-xs"
-                      >
-                        Asignar Clave
-                      </button>
-                    </div>
-                  </form>
 
                   {/* Footer */}
                   <div className="flex items-center justify-end pt-2 border-t border-slate-100">

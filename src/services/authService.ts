@@ -5,14 +5,21 @@
 
 import { Profesor } from '../types/convivencia';
 import { StorageService } from './storageService';
+import { llamarApi } from './apiService';
 
 const SESSION_KEY = 'sigc_bi_auth_user_v2';
 const SESSION_TYPE_KEY = 'sigc_bi_session_type_v1';
 const LAST_ACTIVITY_KEY = 'sigc_bi_last_activity_v1';
 const LOGOUT_REASON_KEY = 'sigc_bi_logout_reason_v1';
-const CREDENTIALS_HASH_KEY = 'sigc_bi_teacher_hashes_v3';
-const RESET_CREDENTIALS_EMAILS_KEY = 'sigc_bi_reset_credentials_emails_v1';
-const GOOGLE_CLIENT_ID_KEY = 'sigc_bi_google_oauth_client_id_v1';
+const TOKEN_KEY = 'sigc_bi_session_token_v2';
+
+// Restos de la versión 1 (contraseñas guardadas en el navegador): se eliminan al cargar
+try {
+  ['sigc_bi_teacher_hashes_v3', 'sigc_bi_teacher_hashes_v2', 'sigc_bi_teacher_hashes_v1',
+   'sigc_bi_reset_credentials_emails_v1', 'sigc_bi_google_oauth_client_id_v1'].forEach((k) => localStorage.removeItem(k));
+} catch {
+  // Ignorar
+}
 
 /**
  * Tiempos límite de inactividad para garantizar el cumplimiento del RGPD / ENS
@@ -21,88 +28,6 @@ const GOOGLE_CLIENT_ID_KEY = 'sigc_bi_google_oauth_client_id_v1';
 export const INACTIVITY_LIMIT_SHARED_MS = 15 * 60 * 1000; // 15 minutos en equipos compartidos
 export const INACTIVITY_LIMIT_PERSONAL_MS = 8 * 60 * 60 * 1000; // 8 horas en equipos personales
 export const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Aviso preventivo 60 segundos antes de cerrar
-
-/**
- * Standard NIST SHA-256 implementation in pure TypeScript
- * Guarantees cryptographic hashing without plaintext password exposure (RGPD SEC-12).
- */
-function sha256Hex(ascii: string): string {
-  function rightRotate(value: number, amount: number) {
-    return (value >>> amount) | (value << (32 - amount));
-  }
-
-  let i: number, j: number;
-  let result = '';
-  const words: number[] = [];
-  const asciiBitLength = ascii.length * 8;
-  let hash = [
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ];
-  const k = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-  ];
-
-  for (i = 0; i < ascii.length; i++) {
-    words[i >> 2] |= ascii.charCodeAt(i) << (24 - ((i % 4) * 8));
-  }
-  words[asciiBitLength >> 5] |= 0x80 << (24 - (asciiBitLength % 32));
-  words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
-
-  for (let b = 0; b < words.length; b += 16) {
-    const w = words.slice(b, b + 16);
-    while (w.length < 16) w.push(0);
-    const oldHash = [...hash];
-
-    for (i = 0; i < 64; i++) {
-      if (i >= 16) {
-        const w15 = w[i - 15] || 0;
-        const w2 = w[i - 2] || 0;
-        const s0 = rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3);
-        const s1 = rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10);
-        w[i] = ((w[i - 16] || 0) + s0 + (w[i - 7] || 0) + s1) | 0;
-      }
-
-      const s1 = rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25);
-      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
-      const temp1 = (hash[7] + s1 + ch + k[i] + (w[i] || 0)) | 0;
-      const s0 = rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22);
-      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
-      const temp2 = (s0 + maj) | 0;
-
-      hash = [
-        (temp1 + temp2) | 0,
-        hash[0],
-        hash[1],
-        hash[2],
-        (hash[3] + temp1) | 0,
-        hash[4],
-        hash[5],
-        hash[6],
-      ];
-    }
-
-    for (i = 0; i < 8; i++) {
-      hash[i] = (hash[i] + oldHash[i]) | 0;
-    }
-  }
-
-  for (i = 0; i < 8; i++) {
-    for (j = 3; j >= 0; j--) {
-      const byte = (hash[i] >> (j * 8)) & 255;
-      result += (byte < 16 ? '0' : '') + byte.toString(16);
-    }
-  }
-
-  return result;
-}
 
 export class AuthService {
   /**
@@ -263,617 +188,123 @@ export class AuthService {
     }
   }
 
-  /**
-   * Internal helper: retrieves the store of cryptographic hashes for registered teachers.
-   */
-  private static getCredentialsStore(): Record<string, string> {
+  /** Token de la sesión abierta en el servidor (o null). */
+  static getToken(): string | null {
     try {
-      // Clean legacy stores if present
-      localStorage.removeItem('sigc_bi_teacher_hashes_v2');
-      localStorage.removeItem('sigc_bi_teacher_hashes_v1');
-
-      const raw = localStorage.getItem(CREDENTIALS_HASH_KEY);
-      const store = raw ? (JSON.parse(raw) as Record<string, string>) : {};
-      return store;
+      return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
     } catch {
-      return {};
-    }
-  }
-
-  /**
-   * Elimina todas las contraseñas guardadas en el sistema para permitir pruebas en limpio.
-   */
-  static clearAllCredentials(): void {
-    localStorage.removeItem(CREDENTIALS_HASH_KEY);
-    localStorage.removeItem('sigc_bi_teacher_hashes_v2');
-    localStorage.removeItem('sigc_bi_teacher_hashes_v1');
-    localStorage.removeItem(SESSION_KEY);
-  }
-
-  /**
-   * Obtiene la lista de emails docentes que tienen un reseteo de clave pendiente.
-   */
-  static getResetCredentialsEmails(): string[] {
-    try {
-      const raw = localStorage.getItem(RESET_CREDENTIALS_EMAILS_KEY);
-      return raw ? (JSON.parse(raw) as string[]) : [];
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Guarda la lista de emails docentes que tienen un reseteo de clave pendiente.
-   */
-  static saveResetCredentialsEmails(emails: string[]): void {
-    try {
-      const unique = Array.from(new Set(emails.map((e) => e.toLowerCase().trim()).filter(Boolean)));
-      localStorage.setItem(RESET_CREDENTIALS_EMAILS_KEY, JSON.stringify(unique));
-    } catch {}
-  }
-
-  /**
-   * Marca un email docente con reseteo de clave pendiente.
-   */
-  static markEmailForPasswordReset(email: string): void {
-    const cleanEmail = email.toLowerCase().trim();
-    if (!cleanEmail) return;
-    const list = this.getResetCredentialsEmails();
-    if (!list.includes(cleanEmail)) {
-      list.push(cleanEmail);
-      this.saveResetCredentialsEmails(list);
-    }
-  }
-
-  /**
-   * Elimina un email de la lista de reseteos pendientes tras establecer contraseña.
-   */
-  static clearEmailFromPasswordReset(email: string): void {
-    const cleanEmail = email.toLowerCase().trim();
-    if (!cleanEmail) return;
-    const list = this.getResetCredentialsEmails().filter((e) => e !== cleanEmail);
-    this.saveResetCredentialsEmails(list);
-  }
-
-  /**
-   * Comprueba si un usuario tiene la indicación expresa de tener que cambiar la contraseña al entrar.
-   */
-  static requiresPasswordChange(email: string): boolean {
-    const cleanEmail = email.toLowerCase().trim();
-    if (this.getResetCredentialsEmails().includes(cleanEmail)) return true;
-    const teachersList = StorageService.getProfesores();
-    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
-    return Boolean(prof?.requiere_cambio_clave);
-  }
-
-  /**
-   * Returns whether a teacher already has an active, valid registered password credential hash.
-   */
-  static hasTeacherRegisteredPassword(email: string): boolean {
-    const cleanEmail = email.toLowerCase().trim();
-    // Si tiene la indicación de cambio obligatorio de clave, se considera sin contraseña activa válida
-    if (this.requiresPasswordChange(cleanEmail)) return false;
-
-    const store = this.getCredentialsStore();
-    if (store[cleanEmail]) return true;
-
-    // Comprobación redundante en la ficha del docente (custodiada en Google Drive)
-    const teachersList = StorageService.getProfesores();
-    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
-    if (prof && prof.password_hash && !prof.requiere_cambio_clave) {
-      store[cleanEmail] = prof.password_hash;
-      try {
-        localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-      } catch {}
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Retrieves the stored SHA-256 hash for a given teacher email.
-   */
-  static getTeacherHash(email: string): string | null {
-    const cleanEmail = email.toLowerCase().trim();
-    if (this.requiresPasswordChange(cleanEmail)) return null;
-
-    const store = this.getCredentialsStore();
-    if (store[cleanEmail]) return store[cleanEmail];
-
-    // Comprobación redundante en la ficha del docente
-    const teachersList = StorageService.getProfesores();
-    const prof = teachersList.find((p) => p.email.toLowerCase() === cleanEmail);
-    if (prof && prof.password_hash && !prof.requiere_cambio_clave) {
-      store[cleanEmail] = prof.password_hash;
-      try {
-        localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-      } catch {}
-      return prof.password_hash;
-    }
-
-    return null;
-  }
-
-  /**
-   * Obtiene la totalidad de hashes de credenciales de docentes para sincronización centralizada en Google Drive.
-   */
-  static getAllCredentials(): Record<string, string> {
-    const store = this.getCredentialsStore();
-    const resetSet = new Set(this.getResetCredentialsEmails());
-    // Consolidar también con los hashes presentes en las fichas de profesores
-    const teachersList = StorageService.getProfesores();
-    teachersList.forEach((p) => {
-      const k = p.email.toLowerCase().trim();
-      if (resetSet.has(k) || p.requiere_cambio_clave) {
-        delete store[k];
-      } else if (p.password_hash && !store[k]) {
-        store[k] = p.password_hash;
-      }
-    });
-    return store;
-  }
-
-  /**
-   * Guarda o actualiza directamente un hash de credencial recibido desde Google Drive.
-   */
-  static setTeacherHashDirect(email: string, hash: string): void {
-    const cleanEmail = email.toLowerCase().trim();
-    if (!cleanEmail || !hash) return;
-    try {
-      this.clearEmailFromPasswordReset(cleanEmail);
-      const store = this.getCredentialsStore();
-      store[cleanEmail] = hash;
-      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-
-      const profs = StorageService.getProfesores();
-      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1) {
-        profs[idx].password_hash = hash;
-        profs[idx].requiere_cambio_clave = false;
-        StorageService.saveProfesores(profs);
-      }
-    } catch (e) {
-      console.error('Error guardando hash directo:', e);
-    }
-  }
-
-  /**
-   * Elimina directamente un hash de credencial cuando se ha revocado en otro equipo.
-   */
-  static removeTeacherHashDirect(email: string): void {
-    const cleanEmail = email.toLowerCase().trim();
-    if (!cleanEmail) return;
-    try {
-      this.markEmailForPasswordReset(cleanEmail);
-      const store = this.getCredentialsStore();
-      delete store[cleanEmail];
-      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-
-      const profs = StorageService.getProfesores();
-      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1) {
-        delete profs[idx].password_hash;
-        profs[idx].requiere_cambio_clave = true;
-        StorageService.saveProfesores(profs);
-      }
-    } catch (e) {
-      console.error('Error eliminando hash de credencial:', e);
-    }
-  }
-
-  /**
-   * Fusiona hashes de credenciales provenientes de la base de datos centralizada de Google Drive.
-   */
-  static mergeRemoteCredentials(remoteStore: Record<string, string>, resetEmails: string[] = []): void {
-    if (!remoteStore || typeof remoteStore !== 'object') return;
-    try {
-      const resetSet = new Set([...this.getResetCredentialsEmails(), ...resetEmails.map((e) => e.toLowerCase().trim())]);
-      const localStore = this.getCredentialsStore();
-      let changed = false;
-      const profs = StorageService.getProfesores();
-      let profsChanged = false;
-
-      // 1. Limpiar cualquier email que esté en la lista de reseteos pendientes
-      for (const email of resetSet) {
-        if (localStore[email]) {
-          delete localStore[email];
-          changed = true;
-        }
-      }
-
-      // 2. Fusionar las credenciales remotas activas
-      for (const [email, hash] of Object.entries(remoteStore)) {
-        const cleanEmail = email.toLowerCase().trim();
-        // Si el usuario está pendiente de reseteo, ignorar cualquier hash remoto antiguo
-        if (resetSet.has(cleanEmail)) {
-          if (localStore[cleanEmail]) {
-            delete localStore[cleanEmail];
-            changed = true;
-          }
-          continue;
-        }
-
-        if (cleanEmail && hash && (!localStore[cleanEmail] || localStore[cleanEmail] !== hash)) {
-          localStore[cleanEmail] = hash;
-          changed = true;
-
-          const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-          if (idx !== -1 && profs[idx].password_hash !== hash) {
-            profs[idx].password_hash = hash;
-            profs[idx].requiere_cambio_clave = false;
-            profsChanged = true;
-          }
-        }
-      }
-      if (changed) {
-        localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(localStore));
-      }
-      if (profsChanged) {
-        StorageService.saveProfesores(profs);
-      }
-    } catch (e) {
-      console.error('Error fusionando credenciales remotas:', e);
-    }
-  }
-
-  /**
-   * Sets or updates the cryptographic password hash for a registered teacher.
-   */
-  static setTeacherPassword(email: string, plainPassword: string): boolean {
-    try {
-      const cleanEmail = email.toLowerCase().trim();
-      const store = this.getCredentialsStore();
-      const hash = sha256Hex(plainPassword.trim());
-      store[cleanEmail] = hash;
-      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-      this.clearEmailFromPasswordReset(cleanEmail);
-
-      // Guardar también en la ficha del profesor para que viaje con el censo en Drive
-      const profs = StorageService.getProfesores();
-      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1) {
-        profs[idx].password_hash = hash;
-        profs[idx].requiere_cambio_clave = false;
-        profs[idx].fecha_modificacion_clave = new Date().toISOString();
-        StorageService.saveProfesores(profs);
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Restablece la contraseña de un docente (elimina su hash almacenado y activa requiere_cambio_clave)
-   * para que obligatoriamente deba definir una nueva contraseña en su próximo inicio de sesión en cualquier equipo.
-   * Registra la acción en la auditoría inmutable del centro.
-   */
-  static resetTeacherPassword(email: string, adminEmail: string = 'mgonruz857@g.educaand.es'): boolean {
-    try {
-      const cleanEmail = email.toLowerCase().trim();
-      const store = this.getCredentialsStore();
-      delete store[cleanEmail];
-      localStorage.setItem(CREDENTIALS_HASH_KEY, JSON.stringify(store));
-      this.markEmailForPasswordReset(cleanEmail);
-
-      const profs = StorageService.getProfesores();
-      const idx = profs.findIndex((p) => p.email.toLowerCase() === cleanEmail);
-      if (idx !== -1) {
-        delete profs[idx].password_hash;
-        profs[idx].requiere_cambio_clave = true;
-        profs[idx].fecha_modificacion_clave = new Date().toISOString();
-        StorageService.saveProfesores(profs);
-      }
-      
-      StorageService.addAuditLog(
-        adminEmail,
-        'ACTUALIZACION_SISTEMA',
-        `Docente/${cleanEmail}`,
-        `Restablecimiento obligatorio de credenciales de acceso para el docente ${cleanEmail}. Se requerirá nueva contraseña en el próximo inicio de sesión en cualquier dispositivo.`
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Asigna directamente una nueva contraseña para un docente desde la cuenta administradora.
-   * Registra la acción en la auditoría inmutable del centro.
-   */
-  static setTeacherPasswordDirect(email: string, newPassword: string, adminEmail: string = 'mgonruz857@g.educaand.es'): boolean {
-    try {
-      const cleanEmail = email.toLowerCase().trim();
-      if (!newPassword || newPassword.trim().length < 4) {
-        return false;
-      }
-      this.clearEmailFromPasswordReset(cleanEmail);
-      this.setTeacherPassword(cleanEmail, newPassword.trim());
-
-      StorageService.addAuditLog(
-        adminEmail,
-        'ACTUALIZACION_SISTEMA',
-        `Docente/${cleanEmail}`,
-        `Asignación manual de nueva contraseña de acceso para el docente ${cleanEmail} por parte de Jefatura de Estudios.`
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Checks if an email is registered in the official claustro of IES Blas Infante.
-   */
-  static isRegisteredInClaustro(email: string): Profesor | null {
-    const cleanEmail = email.toLowerCase().trim();
-    const teachersList = StorageService.getProfesores();
-    return teachersList.find((p) => p.email.toLowerCase() === cleanEmail) || null;
-  }
-
-  /**
-   * Valida la complejidad no demasiado estricta de la contraseña:
-   * Al menos 6 caracteres y combinar al menos una letra y un número.
-   */
-  static validatePasswordComplexity(password: string): { valid: boolean; error?: string } {
-    const p = (password || '').trim();
-    if (p.length < 6) {
-      return {
-        valid: false,
-        error: 'La contraseña debe tener al menos 6 caracteres.',
-      };
-    }
-    const hasLetter = /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(p);
-    const hasNumber = /[0-9]/.test(p);
-
-    if (!hasLetter || !hasNumber) {
-      return {
-        valid: false,
-        error: 'La contraseña debe combinar letras y números (ejemplo: infante26, blas2026).',
-      };
-    }
-
-    return { valid: true };
-  }
-
-  /**
-   * Valida credenciales corporativas de Google Workspace (@g.educaand.es).
-   * Requisitos obligatorios:
-   * 1. Dominio estrictamente corporativo @g.educaand.es (rechaza @g.educaanda, @gmail.com, etc.).
-   * 2. Cuenta dada de alta previamente en el claustro del centro (IES Blas Infante).
-   * 3. Cuenta en estado ACTIVO (no en situación de baja o traslado).
-   * 4. Contraseña supervisada mediante comprobación criptográfica SHA-256 (rechaza contraseñas incorrectas).
-   */
-  static login(emailInput: string, passwordInput: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
-    const cleanEmail = emailInput.trim().toLowerCase();
-    const cleanPassword = passwordInput.trim();
-
-    // 1. Verificación estricta de formato y dominio corporativo oficial @g.educaand.es
-    const strictDomainRegex = /^[a-z0-9._%+-]+@g\.educaand\.es$/i;
-    if (!strictDomainRegex.test(cleanEmail)) {
-      return {
-        success: false,
-        error: `Acceso restringido: El correo debe pertenecer estrictamente al dominio corporativo oficial @g.educaand.es de la Junta de Andalucía. Dominios como "${cleanEmail.split('@')[1] || cleanEmail}" no están autorizados.`,
-      };
-    }
-
-    // 2. Validación de contraseña no vacía
-    if (!cleanPassword || cleanPassword.length === 0) {
-      return {
-        success: false,
-        error: 'Por favor, introduzca su contraseña de acceso.',
-      };
-    }
-
-    // 3. Verificación de alta previa como miembro del claustro del IES Blas Infante
-    const foundProf = this.isRegisteredInClaustro(cleanEmail);
-    if (!foundProf) {
-      return {
-        success: false,
-        error: `Acceso denegado: La cuenta "${cleanEmail}" no figura en el claustro docente del IES Blas Infante. Debe haber sido dada de alta previamente en la aplicación por Jefatura de Estudios.`,
-      };
-    }
-
-    // 4. Bloqueo estricto para docentes en situación de baja o traslado
-    if (foundProf.estado === 'INACTIVO') {
-      return {
-        success: false,
-        error: `Acceso denegado: La cuenta docente "${cleanEmail}" está actualmente en estado de BAJA en el centro (${foundProf.motivo_baja || 'Fin de destino escolar'}). Contacte con Jefatura de Convivencia.`,
-      };
-    }
-
-    // 5. Supervisión y verificación criptográfica de la contraseña
-    const requiresChange = this.requiresPasswordChange(cleanEmail);
-    const inputHash = sha256Hex(cleanPassword);
-    const storedHash = this.getTeacherHash(cleanEmail);
-
-    if (storedHash && !requiresChange) {
-      // Si ya existe una credencial vinculada para este docente y no requiere cambio, debe coincidir exactamente
-      if (inputHash !== storedHash) {
-        return {
-          success: false,
-          error: `Contraseña incorrecta: La contraseña introducida no coincide con la registrada para ${cleanEmail}. Si no la recuerda, solicite a Jefatura su restablecimiento.`,
-        };
-      }
-    } else {
-      // Primer acceso o cambio obligatorio de contraseña ordenado por Jefatura
-      const complexity = this.validatePasswordComplexity(cleanPassword);
-      if (!complexity.valid) {
-        return {
-          success: false,
-          error: `Requisito de contraseña: ${complexity.error}`,
-        };
-      }
-      // Vinculación de la nueva contraseña
-      this.setTeacherPassword(cleanEmail, cleanPassword);
-      
-      StorageService.addAuditLog(
-        cleanEmail,
-        'ACTUALIZACION_SISTEMA',
-        `Docente/${cleanEmail}`,
-        requiresChange
-          ? `Cambio obligatorio de contraseña completado con éxito por el docente ${cleanEmail}.`
-          : `Primer acceso completado: Contraseña inicial establecida por el propio docente ${cleanEmail}.`
-      );
-    }
-
-    // 6. Autenticación exitosa y persistencia de sesión segura
-    const authenticatedUser: Profesor = foundProf;
-    this.persistSession(authenticatedUser, isShared);
-    return { success: true, user: authenticatedUser };
-  }
-
-  /**
-   * Autenticación Corporativa Directa con Google Workspace (@g.educaand.es).
-   * Permite el inicio de sesión unificado sin requerir crear contraseñas locales en cada navegador.
-   * Valida estrictamente:
-   * 1. Dominio institucional oficial (@g.educaand.es)
-   * 2. Pertenencia al censo oficial del claustro custodiado en Google Drive
-   * 3. Estado ACTIVO en el centro
-   */
-  static loginWithGoogleCorporateAccount(emailInput: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
-    const cleanEmail = emailInput.trim().toLowerCase();
-
-    // 1. Verificación de dominio corporativo oficial @g.educaand.es
-    const strictDomainRegex = /^[a-z0-9._%+-]+@g\.educaand\.es$/i;
-    if (!strictDomainRegex.test(cleanEmail)) {
-      return {
-        success: false,
-        error: `Acceso restringido: El correo debe pertenecer estrictamente al dominio corporativo oficial @g.educaand.es de la Junta de Andalucía. Dominios como "${cleanEmail.split('@')[1] || cleanEmail}" no están autorizados.`,
-      };
-    }
-
-    // 2. Verificación de alta previa como miembro del claustro del IES Blas Infante
-    const foundProf = this.isRegisteredInClaustro(cleanEmail);
-    if (!foundProf) {
-      return {
-        success: false,
-        error: `Acceso denegado: La cuenta "${cleanEmail}" no figura en el claustro docente del IES Blas Infante. Debe haber sido dada de alta previamente en el censo oficial por Jefatura de Estudios.`,
-      };
-    }
-
-    // 3. Bloqueo estricto para docentes en situación de baja o traslado
-    if (foundProf.estado === 'INACTIVO') {
-      return {
-        success: false,
-        error: `Acceso denegado: La cuenta docente "${cleanEmail}" está actualmente en estado de BAJA en el centro (${foundProf.motivo_baja || 'Fin de destino escolar'}). Contacte con Jefatura de Convivencia.`,
-      };
-    }
-
-    // 4. Autenticación exitosa y persistencia de sesión
-    const authenticatedUser: Profesor = foundProf;
-    this.persistSession(authenticatedUser, isShared);
-    return { success: true, user: authenticatedUser };
-  }
-
-
-  /**
-   * Obtiene el ID de cliente de Google Cloud OAuth 2.0 configurado.
-   */
-  static getGoogleClientId(): string {
-    try {
-      const stored = localStorage.getItem(GOOGLE_CLIENT_ID_KEY);
-      if (stored && stored.trim()) return stored.trim();
-      return (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
-    } catch {
-      return '';
-    }
-  }
-
-  /**
-   * Guarda o actualiza el ID de cliente de Google Cloud OAuth 2.0.
-   */
-  static setGoogleClientId(clientId: string): void {
-    try {
-      if (!clientId.trim()) {
-        localStorage.removeItem(GOOGLE_CLIENT_ID_KEY);
-      } else {
-        localStorage.setItem(GOOGLE_CLIENT_ID_KEY, clientId.trim());
-      }
-    } catch (e) {
-      console.error('Error guardando Google Client ID:', e);
-    }
-  }
-
-  /**
-   * Descodifica el payload de un token JWT emitido por los servidores de Google Identity Services.
-   */
-  static decodeGoogleJwt(token: string): { email?: string; email_verified?: boolean; name?: string; picture?: string; sub?: string } | null {
-    try {
-      const parts = token.split('.');
-      if (parts.length < 2) return null;
-      const base64Url = parts[1];
-      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      return JSON.parse(jsonPayload);
-    } catch (e) {
-      console.error('Error descodificando token Google JWT:', e);
       return null;
     }
   }
 
+  private static guardarToken(token: string, isShared: boolean): void {
+    try {
+      if (isShared) {
+        sessionStorage.setItem(TOKEN_KEY, token);
+        localStorage.removeItem(TOKEN_KEY);
+      } else {
+        localStorage.setItem(TOKEN_KEY, token);
+        sessionStorage.removeItem(TOKEN_KEY);
+      }
+    } catch {
+      // Ignorar
+    }
+  }
+
+  /** Comprueba que el correo pertenece al dominio corporativo @g.educaand.es. */
+  static esCorreoCorporativo(email: string): boolean {
+    return /^[a-z0-9._%+-]+@g\.educaand\.es$/i.test((email || '').trim());
+  }
+
   /**
-   * Autentica directamente con el token JWT verificado por los servidores oficiales de Google (Google Identity Services).
-   * La verificación de la contraseña se realiza en los servidores de Google (accounts.google.com).
-   * La aplicación comprueba que:
-   * 1. Google haya verificado el correo electrónico (email_verified: true).
-   * 2. El dominio sea estrictamente @g.educaand.es.
-   * 3. La cuenta esté dada de alta en el claustro del IES Blas Infante.
-   * 4. El docente se encuentre en estado ACTIVO.
+   * Consulta al servidor si un correo está dado de alta, activo y con contraseña ya fijada.
+   * Sirve para saber si hay que pedir la contraseña dos veces (primer acceso).
    */
-  static loginWithGoogleJwt(jwtToken: string, isShared: boolean = true): { success: boolean; user?: Profesor; error?: string } {
-    const payload = this.decodeGoogleJwt(jwtToken);
-    if (!payload || !payload.email) {
-      return {
-        success: false,
-        error: 'Error de verificación con Google: No se ha podido validar la identidad del usuario desde accounts.google.com.',
-      };
+  static async consultarCuenta(email: string): Promise<{
+    ok: boolean;
+    registrado?: boolean;
+    activo?: boolean;
+    tieneClave?: boolean;
+    motivoBaja?: string;
+    error?: string;
+  }> {
+    const r = await llamarApi('estadoCuenta', { email: email.trim().toLowerCase() });
+    return r as any;
+  }
+
+  /**
+   * Valida la complejidad mínima de la contraseña (la vuelve a comprobar el servidor):
+   * al menos 6 caracteres combinando letras y números.
+   */
+  static validatePasswordComplexity(password: string): { valid: boolean; error?: string } {
+    const p = (password || '').trim();
+    if (p.length < 6) {
+      return { valid: false, error: 'La contraseña debe tener al menos 6 caracteres.' };
     }
-
-    if (payload.email_verified === false) {
-      return {
-        success: false,
-        error: 'Google no ha verificado la autenticidad de esta cuenta de correo. Acceso denegado.',
-      };
+    const hasLetter = /[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/.test(p);
+    const hasNumber = /[0-9]/.test(p);
+    if (!hasLetter || !hasNumber) {
+      return { valid: false, error: 'La contraseña debe combinar letras y números (ejemplo: infante26, blas2026).' };
     }
+    return { valid: true };
+  }
 
-    const cleanEmail = payload.email.trim().toLowerCase();
-
-    // 1. Verificación de dominio corporativo oficial @g.educaand.es
-    if (!cleanEmail.endsWith('@g.educaand.es')) {
-      return {
-        success: false,
-        error: `Acceso restringido: Se ha identificado con ${cleanEmail}, pero solo se autorizan cuentas oficiales del dominio @g.educaand.es de la Junta de Andalucía.`,
-      };
+  /**
+   * Inicia sesión comprobando la contraseña EN EL SERVIDOR.
+   * Si el docente aún no tiene contraseña, la que escriba queda fijada (primer acceso).
+   */
+  static async login(
+    emailInput: string,
+    passwordInput: string,
+    isShared: boolean = true
+  ): Promise<{ success: boolean; user?: Profesor; error?: string; primerAcceso?: boolean }> {
+    const email = emailInput.trim().toLowerCase();
+    if (!this.esCorreoCorporativo(email)) {
+      return { success: false, error: 'El correo debe pertenecer al dominio corporativo @g.educaand.es de la Junta de Andalucía.' };
     }
-
-    // 2. Comprobar alta en el claustro del IES Blas Infante
-    const foundProf = this.isRegisteredInClaustro(cleanEmail);
-    if (!foundProf) {
-      return {
-        success: false,
-        error: `Acceso denegado: La cuenta Google Workspace "${cleanEmail}" está autenticada con éxito, pero NO figura en el claustro del IES Blas Infante. Jefatura de Estudios debe darla de alta previamente.`,
-      };
+    const clave = passwordInput.trim();
+    if (!clave) {
+      return { success: false, error: 'Por favor, introduzca su contraseña de acceso.' };
     }
-
-    // 3. Comprobar que no esté de baja
-    if (foundProf.estado === 'INACTIVO') {
-      return {
-        success: false,
-        error: `Acceso denegado: El docente "${cleanEmail}" está en estado de BAJA en el centro (${foundProf.motivo_baja || 'Fin de destino escolar'}).`,
-      };
+    const r = await llamarApi('login', { email, clave });
+    if (!r.ok || !r.token || !r.usuario) {
+      return { success: false, error: r.error || 'No se ha podido iniciar sesión.' };
     }
+    const user = r.usuario as Profesor;
+    this.guardarToken(r.token, isShared);
+    this.persistSession(user, isShared);
+    return { success: true, user, primerAcceso: Boolean(r.primerAcceso) };
+  }
 
-    // 4. Inicio de sesión exitoso supervisado por Google
-    const authenticatedUser: Profesor = foundProf;
-    this.persistSession(authenticatedUser, isShared);
-    return { success: true, user: authenticatedUser };
+  /** Cambia la contraseña del docente con sesión iniciada (exige la actual). */
+  static async cambiarClave(actual: string, nueva: string): Promise<{ success: boolean; error?: string }> {
+    const complejidad = this.validatePasswordComplexity(nueva);
+    if (!complejidad.valid) return { success: false, error: complejidad.error };
+    const r = await llamarApi('cambiarClave', { token: this.getToken(), actual: actual.trim(), nueva: nueva.trim() });
+    return r.ok ? { success: true } : { success: false, error: r.error };
+  }
+
+  /**
+   * Restablece la contraseña de un docente (solo Jefatura/Convivencia).
+   * El docente fijará una nueva, escribiéndola dos veces, en su próximo acceso.
+   */
+  static async restablecerClave(email: string): Promise<{ success: boolean; error?: string }> {
+    const r = await llamarApi('restablecerClave', { token: this.getToken(), email: email.trim().toLowerCase() });
+    return r.ok ? { success: true } : { success: false, error: r.error };
+  }
+
+  /** Qué docentes han activado ya su cuenta (tienen contraseña). Solo Jefatura/Convivencia. */
+  static async estadoClaves(): Promise<Record<string, boolean> | null> {
+    const r = await llamarApi('estadoClaves', { token: this.getToken() });
+    return r.ok ? (r.estado as Record<string, boolean>) : null;
+  }
+
+  /**
+   * Comprueba si un correo figura en el claustro cargado en este navegador.
+   */
+  static isRegisteredInClaustro(email: string): Profesor | null {
+    const cleanEmail = email.toLowerCase().trim();
+    return StorageService.getProfesores().find((p) => p.email.toLowerCase() === cleanEmail) || null;
   }
 
   /**
@@ -882,7 +313,13 @@ export class AuthService {
    * pantalla de inicio de sesión pueda informar al profesor amigablemente.
    */
   static logout(reason: 'MANUAL' | 'INACTIVITY' = 'MANUAL'): void {
+    const token = this.getToken();
+    if (token) {
+      llamarApi('logout', { token }).catch(() => {});
+    }
     try {
+      sessionStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(TOKEN_KEY);
       sessionStorage.removeItem(SESSION_KEY);
       sessionStorage.removeItem(SESSION_TYPE_KEY);
       sessionStorage.removeItem(LAST_ACTIVITY_KEY);

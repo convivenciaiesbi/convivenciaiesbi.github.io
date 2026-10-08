@@ -76,13 +76,31 @@ import {
   Clock
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
+import { EVENTO_SESION_CADUCADA } from './services/apiService';
 import { CUENTA_DRIVE } from './config/entorno';
 
 export default function App() {
   // Authentication session (null means show LoginView)
   const [currentUser, setCurrentUser] = useState<Profesor | null>(() => {
-    return AuthService.getCurrentUser();
+    // Sin token de servidor (p. ej. sesión de la versión anterior) hay que volver a entrar
+    const user = AuthService.getCurrentUser();
+    if (user && !AuthService.getToken()) {
+      AuthService.logout('MANUAL');
+      return null;
+    }
+    return user;
   });
+
+  // Si el servidor indica que la sesión ya no es válida, volver a la pantalla de acceso
+  useEffect(() => {
+    const alCaducar = () => {
+      AuthService.logout('MANUAL');
+      StorageService.clearMemoryCacheForFreshLogin();
+      setCurrentUser(null);
+    };
+    window.addEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+    return () => window.removeEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+  }, []);
 
   const [currentView, setCurrentView] = useState<string>('imponer');
 

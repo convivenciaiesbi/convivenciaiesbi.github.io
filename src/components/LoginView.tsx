@@ -47,9 +47,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [authStage, setAuthStage] = useState<string | null>(null);
-  const [isDriveSyncing, setIsDriveSyncing] = useState(true);
-  const [isCheckingUserCredentials, setIsCheckingUserCredentials] = useState(false);
-  const [syncVersion, setSyncVersion] = useState(0);
   const [isSharedDevice, setIsSharedDevice] = useState<boolean>(true);
   const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
 
@@ -63,191 +60,97 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     }
   }, []);
 
-  // Al montar la pantalla de login (en cualquier dispositivo nuevo), limpiar caché local y sincronizar inmediatamente desde Drive
+  // Al montar la pantalla de acceso se vacían los datos en memoria (se descargan al entrar)
   useEffect(() => {
-    let isMounted = true;
     StorageService.clearMemoryCacheForFreshLogin();
-    GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true }).then((res) => {
-      if (isMounted) {
-        setIsDriveSyncing(false);
-        if (res.success) {
-          setSyncVersion((v) => v + 1);
-        }
-      }
-    }).catch(() => {
-      if (isMounted) setIsDriveSyncing(false);
-    });
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
   const cleanEmail = email.trim().toLowerCase();
-  const isEducaand = cleanEmail.endsWith('@g.educaand.es');
-  // Re-evaluar de forma reactiva con syncVersion para reflejar los datos recién descargados de Drive
-  const registeredTeacher = isEducaand ? AuthService.isRegisteredInClaustro(cleanEmail) : null;
-  const requiresPasswordChange = isEducaand ? AuthService.requiresPasswordChange(cleanEmail) : false;
-  const hasRegisteredPassword = isEducaand ? AuthService.hasTeacherRegisteredPassword(cleanEmail) : false;
+  const isEducaand = /^[a-z0-9._%+-]+@g\.educaand\.es$/i.test(cleanEmail);
 
-  // Si el docente escribe su correo y no figura en claustro, o no tiene clave, o requiere cambio:
-  // verificar Drive en segundo plano de inmediato para tener el estado actualizado al instante
+  // Estado de la cuenta según el servidor (alta en el claustro, activa y si ya tiene contraseña)
+  const [estadoCuenta, setEstadoCuenta] = useState<{
+    email: string;
+    registrado?: boolean;
+    activo?: boolean;
+    tieneClave?: boolean;
+    motivoBaja?: string;
+  } | null>(null);
+  const [isCheckingUserCredentials, setIsCheckingUserCredentials] = useState(false);
+
   useEffect(() => {
-    if (cleanEmail && isEducaand && !isDriveSyncing) {
-      const localTeacher = AuthService.isRegisteredInClaustro(cleanEmail);
-      const localHasPass = AuthService.hasTeacherRegisteredPassword(cleanEmail);
-      const localReqChange = AuthService.requiresPasswordChange(cleanEmail);
-
-      if (!localTeacher || !localHasPass || localReqChange) {
-        let isMounted = true;
-        setIsCheckingUserCredentials(true);
-        GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true })
-          .then((res) => {
-            if (isMounted) {
-              setIsCheckingUserCredentials(false);
-              if (res.success) {
-                setSyncVersion((v) => v + 1);
-              }
-            }
-          })
-          .catch(() => {
-            if (isMounted) setIsCheckingUserCredentials(false);
-          });
-        return () => {
-          isMounted = false;
-        };
-      }
+    if (!isEducaand) {
+      setEstadoCuenta(null);
+      return;
     }
-  }, [cleanEmail, isEducaand, isDriveSyncing]);
+    let vigente = true;
+    setIsCheckingUserCredentials(true);
+    const t = setTimeout(() => {
+      AuthService.consultarCuenta(cleanEmail)
+        .then((r) => {
+          if (!vigente) return;
+          setEstadoCuenta(r.ok ? { email: cleanEmail, ...r } : null);
+          if (!r.ok && r.error) setErrorMessage(r.error);
+        })
+        .finally(() => {
+          if (vigente) setIsCheckingUserCredentials(false);
+        });
+    }, 400);
+    return () => {
+      vigente = false;
+      clearTimeout(t);
+    };
+  }, [cleanEmail, isEducaand]);
 
-  // Se requiere definir o cambiar contraseña si no tiene contraseña previa O si Jefatura exige cambio
-  const isFirstTimeAccess = Boolean(
-    isEducaand && 
-    registeredTeacher && 
-    (!hasRegisteredPassword || requiresPasswordChange) && 
-    !isDriveSyncing && 
-    !isCheckingUserCredentials
-  );
-  const unidad = StorageService.getUnidadInstitucional();
+  const estadoActual = estadoCuenta && estadoCuenta.email === cleanEmail ? estadoCuenta : null;
+  const registeredTeacher = Boolean(estadoActual?.registrado && estadoActual?.activo);
+  const cuentaNoRegistrada = Boolean(estadoActual && !estadoActual.registrado);
+  const cuentaDeBaja = Boolean(estadoActual?.registrado && estadoActual.activo === false);
+  const requiresPasswordChange = false;
+  const isDriveSyncing = false;
+  // Primer acceso (o contraseña restablecida por Jefatura): se escribe dos veces
+  const isFirstTimeAccess = Boolean(registeredTeacher && estadoActual?.tieneClave === false && !isCheckingUserCredentials);
 
-  // Password / Credentials based submission (Única vía de acceso centralizado)
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!cleanEmail.endsWith('@g.educaand.es')) {
-      setErrorMessage(`Acceso restringido: El usuario debe pertenecer al dominio corporativo oficial @g.educaand.es de la Junta de Andalucía.`);
+    if (!isEducaand) {
+      setErrorMessage('Acceso restringido: El usuario debe pertenecer al dominio corporativo oficial @g.educaand.es de la Junta de Andalucía.');
       return;
     }
-
-    // 1. Si no figura en el claustro local, hacer SIEMPRE una consulta forzada a Google Drive
-    // por si fue dado de alta hace poco en otro equipo
-    let teacher = registeredTeacher;
-    if (!teacher) {
-      try {
-        setIsLoading(true);
-        setAuthStage('Verificando alta en Google Drive...');
-        const driveRes = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
-        if (driveRes.success) {
-          teacher = AuthService.isRegisteredInClaustro(cleanEmail);
-          setSyncVersion((v) => v + 1);
-        }
-      } catch {
-        // Fallback
-      }
-    }
-
-    if (!teacher) {
-      setIsLoading(false);
-      setAuthStage(null);
-      setErrorMessage(`Acceso denegado: La cuenta "${cleanEmail}" no figura en el claustro docente del IES Blas Infante. Debe ser dada de alta previamente por Jefatura de Estudios.`);
+    if (cuentaDeBaja) {
+      setErrorMessage(`Acceso bloqueado: La cuenta "${cleanEmail}" está dada de baja en el centro${estadoActual?.motivoBaja ? ` (${estadoActual.motivoBaja})` : ''}.`);
       return;
     }
-
-    if (teacher.estado === 'INACTIVO') {
-      setIsLoading(false);
-      setAuthStage(null);
-      setErrorMessage(`Acceso bloqueado: La cuenta docente "${cleanEmail}" está actualmente dada de BAJA en el centro (${teacher.motivo_baja || 'Fin de destino escolar'}).`);
-      return;
-    }
-
     if (!password.trim()) {
-      setIsLoading(false);
-      setAuthStage(null);
       setErrorMessage('Por favor, introduzca su contraseña.');
       return;
     }
-
-    // Comprobar si requiere definir o cambiar contraseña
-    let teacherRequiresChange = AuthService.requiresPasswordChange(cleanEmail);
-    let teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
-
-    // Si parece que necesita cambio o que no tiene contraseña, sincronizar con Drive para confirmar
-    if (!teacherAlreadyHasPassword || teacherRequiresChange) {
-      try {
-        setAuthStage('Verificando credenciales en Google Drive...');
-        const driveCheck = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
-        if (driveCheck.success) {
-          teacherRequiresChange = AuthService.requiresPasswordChange(cleanEmail);
-          teacherAlreadyHasPassword = AuthService.hasTeacherRegisteredPassword(cleanEmail);
-          setSyncVersion((v) => v + 1);
-        }
-      } catch {
-        // Fallback
-      }
-    }
-
-    const effectiveSetupRequired = !teacherAlreadyHasPassword || teacherRequiresChange;
-
-    if (effectiveSetupRequired) {
+    if (isFirstTimeAccess) {
       if (password !== confirmPassword) {
-        setIsLoading(false);
-        setAuthStage(null);
         setErrorMessage('Las contraseñas no coinciden. Por favor, asegúrese de escribir la misma en ambas casillas.');
         return;
       }
-
       const complexity = AuthService.validatePasswordComplexity(password);
       if (!complexity.valid) {
-        setIsLoading(false);
-        setAuthStage(null);
         setErrorMessage(`Requisitos de contraseña: ${complexity.error}`);
         return;
       }
     }
 
     setIsLoading(true);
-    setAuthStage('Descargando datos actualizados desde Google Drive...');
-
-    // SIEMPRE descargar el estado en tiempo real desde Google Drive antes de iniciar sesión
-    // para que ningún usuario vea jamás datos de caché local al entrar desde cualquier dispositivo.
-    try {
-      await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true, skipAutoPush: !effectiveSetupRequired });
-      setSyncVersion((v) => v + 1);
-    } catch {
-      // Continuar con estado en memoria si hay corte de red puntual
-    }
-
-    setAuthStage(effectiveSetupRequired ? 'Registrando y sincronizando contraseña...' : 'Accediendo al sistema...');
-
-    // Iniciar sesión
-    let res = AuthService.login(cleanEmail, password, isSharedDevice);
+    setAuthStage(isFirstTimeAccess ? 'Registrando su contraseña de forma segura...' : 'Comprobando sus credenciales...');
+    const res = await AuthService.login(cleanEmail, password, isSharedDevice);
+    setIsLoading(false);
+    setAuthStage(null);
 
     if (res.success && res.user) {
-      // Solo subir a Google Drive si se acaba de registrar o cambiar la contraseña por primera vez;
-      // en inicios de sesión ordinarios NUNCA empujar caché local hacia Drive.
-      if (effectiveSetupRequired) {
-        GoogleDriveSyncService.pushToGoogleDrive().catch((e) => {
-          console.warn('Sincronización de nueva credencial con Drive:', e);
-        });
-      }
-
-      setIsLoading(false);
-      setAuthStage(null);
       onLoginSuccess(res.user);
     } else {
-      setIsLoading(false);
-      setAuthStage(null);
-      setErrorMessage(res.error || 'Contraseña incorrecta.');
+      setErrorMessage(res.error || 'No se ha podido iniciar sesión.');
+      // Por si otra persona fijó la contraseña mientras tanto, refrescar el estado
+      AuthService.consultarCuenta(cleanEmail).then((r) => r.ok && setEstadoCuenta({ email: cleanEmail, ...r }));
     }
   };
 
@@ -388,21 +291,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
               {/* Feedback en verde si el docente está en el claustro */}
               {isEducaand && registeredTeacher && (
-                <div className="flex items-center justify-between text-[11px] text-emerald-800 font-medium mt-1.5 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg animate-in fade-in duration-100">
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                    <span>
-                      Claustro: <strong>{registeredTeacher.nombre} {registeredTeacher.apellidos}</strong> ({registeredTeacher.departamento})
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-bold bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded border border-emerald-200">
-                    {registeredTeacher.rol === 'ROLE_CONVIVENCIA_ADMIN' ? 'Convivencia' : 'Docente'}
-                  </span>
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 font-medium mt-1.5 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg animate-in fade-in duration-100">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                  <span>Cuenta del claustro verificada.</span>
                 </div>
               )}
 
               {/* Feedback en rojo si el docente NO está en el claustro */}
-              {isEducaand && !registeredTeacher && cleanEmail.length > 5 && (
+              {isEducaand && cuentaNoRegistrada && (
                 <div className="flex items-center gap-1.5 text-[11px] text-rose-800 font-medium mt-1.5 bg-rose-50 border border-rose-200 px-2.5 py-1.5 rounded-lg animate-in fade-in duration-100">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
                   <span>Cuenta no registrada en el claustro del IES Blas Infante. Debe ser dada de alta previamente por Jefatura.</span>
@@ -411,10 +307,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             </div>
 
             {/* Indicador de verificación de credenciales con Google Drive */}
-            {(isDriveSyncing || isCheckingUserCredentials) && isEducaand && registeredTeacher && (
+            {isCheckingUserCredentials && isEducaand && (
               <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-xl text-xs text-sky-800 flex items-center gap-2 animate-in fade-in duration-100">
                 <Loader2 className="w-3.5 h-3.5 text-sky-600 animate-spin shrink-0" />
-                <span className="font-medium">Sincronizando credenciales seguras con Google Drive...</span>
+                <span className="font-medium">Comprobando la cuenta...</span>
               </div>
             )}
 

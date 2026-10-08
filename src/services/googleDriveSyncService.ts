@@ -7,6 +7,7 @@ import { Alumno, Profesor, Sancion, Compensacion, AuditLog } from '../types/conv
 import { StorageService } from './storageService';
 import { AuthService } from './authService';
 import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/entorno';
+import { llamarApi } from './apiService';
 
 const SYNC_URL_STORAGE_KEY = 'sigc_bi_drive_sync_api_url_v1';
 const LAST_SYNC_STORAGE_KEY = 'sigc_bi_last_drive_sync_timestamp_v1';
@@ -44,6 +45,8 @@ export class GoogleDriveSyncService {
   // Se incrementa cada vez que termina una subida. Una descarga que empezó antes
   // de esa subida trae datos anteriores a ella y no debe aplicarse.
   private static pushEpoch: number = 0;
+  /** Último error al guardar (null si el último guardado fue bien). */
+  static lastPushError: string | null = null;
 
   /**
    * Dispara una sincronización rápida no bloqueante con debounce.
@@ -107,15 +110,10 @@ export class GoogleDriveSyncService {
    */
   static getFullDatabasePayload(): DriveDatabaseState {
     const unidad = StorageService.getUnidadInstitucional();
-    const creds = AuthService.getAllCredentials();
+    // Las contraseñas nunca salen del servidor ni viajan en los datos
     const profs = StorageService.getProfesores().map(p => {
-      const cleanMail = p.email.toLowerCase().trim();
-      const hash = p.password_hash || creds[cleanMail];
-      if (hash) {
-        creds[cleanMail] = hash;
-        return { ...p, password_hash: hash };
-      }
-      return p;
+      const { password_hash, requiere_cambio_clave, ...resto } = p as any;
+      return resto as Profesor;
     });
 
     return {
@@ -129,7 +127,6 @@ export class GoogleDriveSyncService {
         drive_folder_id: unidad.folderId || CARPETA_DRIVE_ID,
       },
       profesores: profs,
-      credenciales_profesores: creds,
       alumnos: StorageService.getAlumnos(),
       sanciones: StorageService.getSanciones(),
       compensaciones: StorageService.getCompensaciones(),
@@ -137,7 +134,6 @@ export class GoogleDriveSyncService {
       deleted_sanciones: StorageService.getDeletedSancionIds(),
       deleted_alumnos: StorageService.getDeletedAlumnoIds(),
       deleted_profesores: StorageService.getDeletedProfesorIds(),
-      reset_credenciales_emails: AuthService.getResetCredentialsEmails(),
     };
   }
 
@@ -162,52 +158,19 @@ export class GoogleDriveSyncService {
 
     const pushEpochAtStart = this.pushEpoch;
 
+    const token = AuthService.getToken();
+    if (!token) {
+      return { success: false, message: 'Debe iniciar sesión para sincronizar.' };
+    }
+
     try {
-      const controller = new AbortController();
-      // Timeout ágil para no bloquear la interfaz en redes lentas
-      const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-      // SIEMPRE forzar lectura fresca desde Google Drive sin depender de timestamps en caché local
-      // para asegurar que todos los dispositivos vean exactamente el mismo estado en tiempo real.
-      const url = `${apiUrl}?action=read_database&t=${Date.now()}&r=${Math.random().toString(36).substring(2, 8)}`;
-
-      const response = await fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: {
-          'Accept': 'application/json',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Error en el servidor de Google Drive (Código HTTP ${response.status})`);
+      const respuesta = await llamarApi('leer', { token });
+      if (!respuesta.ok) {
+        throw new Error(respuesta.error || 'El servidor de datos no ha respondido correctamente.');
       }
-
-      // 1. Obtener texto crudo y parsear de forma resiliente (maneja JSON directo, data=... y codificación URL)
-      const rawText = await response.text();
-      let remoteData: any = null;
-
-      try {
-        remoteData = JSON.parse(rawText);
-      } catch {
-        const trimmed = (rawText || '').trim();
-        if (trimmed.startsWith('data=')) {
-          try {
-            const decoded = decodeURIComponent(trimmed.substring(5).replace(/\+/g, ' '));
-            remoteData = JSON.parse(decoded);
-          } catch {}
-        } else if (trimmed.startsWith('%7B') || trimmed.startsWith('%7b')) {
-          try {
-            const decoded = decodeURIComponent(trimmed.replace(/\+/g, ' '));
-            remoteData = JSON.parse(decoded);
-          } catch {}
-        }
-      }
-
+      const remoteData: any = respuesta.data;
       if (!remoteData || typeof remoteData !== 'object') {
-        throw new Error('Respuesta inválida del servidor de Google Drive: formato no reconocido.');
+        throw new Error('Respuesta inválida del servidor de datos.');
       }
 
       // Si mientras esperábamos la respuesta terminó una subida desde este dispositivo,
@@ -262,28 +225,13 @@ export class GoogleDriveSyncService {
       const allDeletedProfs = new Set<string>([...remoteDeletedProfs, ...localDeletedProfs]);
       StorageService.saveDeletedProfesorIds(Array.from(allDeletedProfs));
 
-      // Reconciliación de reseteos de contraseñas de docentes
-      const remoteResets = new Set<string>((remoteData.reset_credenciales_emails || []).map((e: string) => (e || '').toLowerCase().trim()));
-      const localResets = new Set<string>(AuthService.getResetCredentialsEmails());
-      const allResets = new Set<string>([...remoteResets, ...localResets]);
-      AuthService.saveResetCredentialsEmails(Array.from(allResets));
-
       // 1. Fusión de Profesores (Drive es la fuente de verdad; solo sobrescribir si hay cambio en vuelo en esta sesión)
       if (remoteData.profesores && Array.isArray(remoteData.profesores)) {
         const localProfs = StorageService.getProfesores();
         const profMap = new Map<string, Profesor>();
         remoteData.profesores.forEach((p: Profesor) => {
           if (p?.email && !allDeletedProfs.has(p.id_profesor) && !allDeletedProfs.has(p.email)) {
-            const cleanEm = p.email.toLowerCase().trim();
-            profMap.set(cleanEm, p);
-
-            if (allResets.has(cleanEm) || p.requiere_cambio_clave) {
-              p.requiere_cambio_clave = true;
-              p.password_hash = undefined;
-              AuthService.removeTeacherHashDirect(cleanEm);
-            } else if (p.password_hash) {
-              AuthService.setTeacherHashDirect(p.email, p.password_hash);
-            }
+            profMap.set(p.email.toLowerCase().trim(), p);
           }
         });
         localProfs.forEach(lp => {
@@ -297,30 +245,12 @@ export class GoogleDriveSyncService {
               }
             } else if (pendingSyncProfEmails.has(k)) {
               // El usuario acaba de editar este profesor en esta sesión activa
-              profMap.set(k, {
-                ...existing,
-                ...lp,
-                password_hash: lp.password_hash || existing.password_hash,
-              });
+              profMap.set(k, { ...existing, ...lp });
               localHasPendingData = true;
-            } else {
-              if (allResets.has(k) || existing.requiere_cambio_clave) {
-                existing.requiere_cambio_clave = true;
-                existing.password_hash = undefined;
-                AuthService.removeTeacherHashDirect(k);
-              } else if (lp.password_hash && !existing.password_hash) {
-                existing.password_hash = lp.password_hash;
-                localHasPendingData = true;
-              }
             }
           }
         });
         StorageService.saveProfesores(Array.from(profMap.values()));
-      }
-
-      // 2. Fusión de Credenciales Centralizadas
-      if (remoteData.credenciales_profesores && typeof remoteData.credenciales_profesores === 'object') {
-        AuthService.mergeRemoteCredentials(remoteData.credenciales_profesores, Array.from(allResets));
       }
 
       // 3. Fusión de Sanciones (Google Drive es la única fuente de verdad salvo ediciones en vuelo en esta sesión)
@@ -475,7 +405,7 @@ export class GoogleDriveSyncService {
     }
 
     const payload = this.getFullDatabasePayload();
-    const jsonString = JSON.stringify(payload);
+    // Copia del estado en este momento: lo que llegue después irá en el siguiente envío
     // Solo se dan por subidos los cambios incluidos en este envío; los que lleguen
     // mientras tanto siguen pendientes para el siguiente.
     const sentSancionIds = StorageService.getPendingSyncSancionIds();
@@ -487,55 +417,29 @@ export class GoogleDriveSyncService {
       StorageService.clearPendingSyncAlumnoIds(sentAlumnoIds);
     };
 
-    // 1. Envío estándar con text/plain (CORS-safelisted, sin preflight OPTIONS y sin envoltorio data=)
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-      await fetch(apiUrl, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: jsonString,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
-      markSent();
+    const token = AuthService.getToken();
+    if (!token) {
       this.finishPush();
-      return {
-        success: true,
-        message: 'Datos y censos custodiados exitosamente en Google Drive.',
-      };
-    } catch {
-      // Fallback a urlencoded si text/plain falla en algún navegador antiguo
+      return { success: false, message: 'Debe iniciar sesión para guardar en Google Drive.' };
     }
 
-    // 2. Envío de respaldo multipart/form-data
-    try {
-      const formBody = new URLSearchParams();
-      formBody.append('data', jsonString);
-      await fetch(apiUrl, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: formBody.toString(),
-      });
+    // El servidor responde y se COMPRUEBA su respuesta: solo se da por guardado si lo confirma
+    const respuesta = await llamarApi('guardar', { token, data: JSON.parse(JSON.stringify(payload)) }, 30000);
+    if (respuesta.ok) {
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
       markSent();
+      this.lastPushError = null;
       this.finishPush();
-      return {
-        success: true,
-        message: 'Datos enviados a Google Drive (vía compatible).',
-      };
-    } catch (err: any) {
-      this.finishPush();
-      return {
-        success: false,
-        message: `Error al sincronizar con Google Drive: ${err.message || err}`,
-      };
+      return { success: true, message: 'Datos guardados en Google Drive.' };
     }
+
+    this.lastPushError = respuesta.error || 'Error desconocido al guardar.';
+    this.finishPush();
+    // Reintentar más tarde: los cambios siguen marcados como pendientes
+    if (respuesta.codigo !== 'NO_AUTH') {
+      setTimeout(() => this.triggerFastSync(0), 15000);
+    }
+    return { success: false, message: `No se ha podido guardar en Google Drive: ${this.lastPushError}` };
   }
 
   private static finishPush(): void {

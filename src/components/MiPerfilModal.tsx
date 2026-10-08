@@ -22,6 +22,7 @@ import {
 import { Profesor, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
 import { StorageService } from '../services/storageService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
+import { CambiarClaveForm } from './CambiarClaveForm';
 
 interface MiPerfilModalProps {
   currentUser: Profesor;
@@ -332,6 +333,8 @@ export const MiPerfilModal: React.FC<MiPerfilModalProps> = ({
               </button>
             </div>
           </form>
+
+          <CambiarClaveForm />
         </div>
       </div>
     </div>

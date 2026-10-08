@@ -15,18 +15,19 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 ## 🔒 Fase 1 – Seguridad
 
 - [x] Quitar el DNI del código público (`src/data/seedData.ts`). Sigue en el historial de versiones antiguas.
-- [ ] Programa de Apps Script: no devolver las contraseñas (hashes) a quien lea los datos
-      y no permitir guardar datos mediante GET.
-- [ ] Acceso real: que el programa de Apps Script compruebe quién hace cada petición
-      (ahora cualquiera con el enlace puede leer, cambiar o borrar todo).
-- [ ] Inicio de sesión comprobado fuera del navegador (ahora se puede saltar, y la primera
-      persona que escribe un correo elige la contraseña de ese profesor).
-- [ ] Permisos por rol aplicados también en el servidor (el profesorado sin privilegios
-      no debe poder descargar todos los datos).
+- [x] Servidor v2 (`src/services/appsScriptServidor.ts`): toda petición exige sesión; contraseñas
+      comprobadas y guardadas (con sal) solo en el servidor; bloqueo tras 5 fallos; sin guardado por GET.
+- [x] Primer acceso: el docente escribe su contraseña dos veces (decisión de Miguel Ángel). Una vez
+      fijada nadie puede "reclamar" la cuenta. Jefatura ve quién ha activado su cuenta y puede restablecerla.
+- [x] Permisos en el servidor: el profesorado sin privilegios no recibe teléfonos, hechos de partes
+      ajenos ni auditoría, y solo puede guardar sus partes y el estado del Aula PAC.
+- [x] Las contraseñas de la versión 1 siguen valiendo y se convierten al formato nuevo en el primer acceso.
+- [x] Cambio de contraseña propio desde "Mi perfil".
+- [ ] Probar en el entorno de pruebas real (servidor v2 publicado en la cuenta de Miguel Ángel).
 
 ## ⚙️ Fase 2 – Funcionamiento
 
-- [ ] Confirmar de verdad que Drive ha guardado (ahora dice "guardado" aunque falle).
+- [x] Confirmar de verdad que Drive ha guardado; si falla, los cambios quedan pendientes y se reintenta.
 - [ ] No perder un parte si se cierra la pestaña o falla la red antes de subirlo.
 - [ ] Sincronización eficiente: descargar solo lo que cambia (ahora descarga toda la
       base de datos cada 3 segundos por pestaña, con riesgo de superar los límites de Google).
@@ -40,11 +41,8 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 
 - [ ] Copia de seguridad del JSON real.
 - [ ] Listado de cambios de saldo para Jefatura (ver recordatorio).
-- [ ] Crear el ID de cliente de Google (Google Cloud) con la cuenta del centro
-      `14007180.aplicaciones@g.educaand.es`, público "Interno", origen
-      `https://convivenciaiesbi.github.io`, y ponerlo en `src/config/entorno.ts` (PRODUCCION).
-      El de pruebas está en la cuenta de Miguel Ángel.
-- [ ] Publicar el programa de Apps Script nuevo en la cuenta del centro.
+- [ ] Publicar el servidor v2 en la cuenta del centro (sustituye al actual; mantener la misma URL
+      con "Gestionar implementaciones > Editar > Nueva versión").
 - [ ] Cambiar `ENTORNO` a `'PRODUCCION'` y publicar.
 
 ## ✨ Fase 3 – Nuevas funcionalidades
