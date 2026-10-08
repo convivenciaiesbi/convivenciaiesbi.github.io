@@ -72,4 +72,10 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       consiga el original en alta resolución (SVG/PDF o PNG ≥ 500 px). No usar `public/logo-ies-blas-infante.jpg`
       (es otro diseño, no el logo real). Hay un escudo de la Junta con errata sin usar
       (`andalucia_edu_emblem_*.jpg`) que convendría borrar.
+- [x] **Sanciones** (Jefatura/Convivencia): aviso del alumnado a 0 puntos sin expediente; expediente con
+      conducta del art. 37 (desplegable, 1 sola), fechas, días que acude, modalidad (aula de Convivencia/
+      Orientación o expulsión), fecha del documento; 4 casillas de trámites (quién y cuándo) y botón
+      "Marcar todos completados"; **parte de sanción en PDF** según el modelo del centro (sin recibí,
+      con espacio para la firma de Dirección). Nombre de la directora en `src/config/centro.ts`.
+      El tutor/a ve en Mi Tutoría las sanciones de su grupo y el estado de los trámites (solo lectura).
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.

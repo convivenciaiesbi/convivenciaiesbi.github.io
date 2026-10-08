@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alumno, Profesor, Sancion, Compensacion, AuditLog } from '../types/convivencia';
+import { Alumno, Profesor, Sancion, Compensacion, AuditLog, ExpedienteSancion } from '../types/convivencia';
 import { StorageService } from './storageService';
 import { AuthService } from './authService';
 import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/entorno';
@@ -37,6 +37,8 @@ export interface DriveDatabaseState {
   deleted_sanciones?: string[];
   deleted_alumnos?: string[];
   deleted_profesores?: string[];
+  expedientes_sancion?: ExpedienteSancion[];
+  deleted_expedientes?: string[];
   reset_credenciales_emails?: string[];
 }
 
@@ -135,6 +137,8 @@ export class GoogleDriveSyncService {
       alumnos: StorageService.getAlumnos(),
       sanciones: StorageService.getSanciones(),
       compensaciones: StorageService.getCompensaciones(),
+      expedientes_sancion: StorageService.getExpedientes(),
+      deleted_expedientes: StorageService.getDeletedExpedienteIds(),
       audit_logs: StorageService.getAuditLogs(),
       deleted_sanciones: StorageService.getDeletedSancionIds(),
       deleted_alumnos: StorageService.getDeletedAlumnoIds(),
@@ -303,6 +307,27 @@ export class GoogleDriveSyncService {
         StorageService.saveSanciones(mergedSanciones);
       }
 
+      // 4b. Expedientes de sanción: Drive manda, salvo los cambios de esta sesión aún sin confirmar
+      if (Array.isArray(remoteData.expedientes_sancion)) {
+        const pendientesExp = new Set(StorageService.getPendingSyncExpedienteIds());
+        const borradosExp = new Set<string>([...(remoteData.deleted_expedientes || []), ...StorageService.getDeletedExpedienteIds()]);
+        StorageService.saveDeletedExpedienteIds(Array.from(borradosExp));
+        const mapaExp = new Map<string, ExpedienteSancion>();
+        remoteData.expedientes_sancion.forEach((e: ExpedienteSancion) => {
+          if (e?.id_expediente && !borradosExp.has(e.id_expediente)) mapaExp.set(e.id_expediente, e);
+        });
+        StorageService.getExpedientes().forEach(e => {
+          if (pendientesExp.has(e.id_expediente) && !borradosExp.has(e.id_expediente)) {
+            mapaExp.set(e.id_expediente, e);
+            localHasPendingData = true;
+          }
+        });
+        if (Array.from(pendientesExp).some(id => borradosExp.has(id))) localHasPendingData = true;
+        StorageService.saveExpedientes(
+          Array.from(mapaExp.values()).sort((a, b) => b.fecha_creacion.localeCompare(a.fecha_creacion))
+        );
+      }
+
       // 4. Fusión de Compensaciones (Unión por id_compensacion)
       if (remoteData.compensaciones && Array.isArray(remoteData.compensaciones)) {
         const localComps = StorageService.getCompensaciones();
@@ -442,12 +467,14 @@ export class GoogleDriveSyncService {
     const sentSancionIds = StorageService.getPendingSyncSancionIds();
     const sentAlumnoIds = StorageService.getPendingSyncAlumnoIds();
     const sentCompIds = StorageService.getPendingSyncCompensacionIds();
+    const sentExpIds = StorageService.getPendingSyncExpedienteIds();
     const markSent = () => {
       this.pushEpoch++;
       StorageService.clearPendingSyncSancionIds(sentSancionIds.length ? sentSancionIds : ['__ninguno__']);
       StorageService.clearPendingSyncProfesorEmails();
       StorageService.clearPendingSyncAlumnoIds(sentAlumnoIds);
       StorageService.clearPendingSyncCompensacionIds(sentCompIds);
+      StorageService.clearPendingSyncExpedienteIds(sentExpIds);
       guardarCola(AuthService.getCurrentUser()?.email);
     };
 

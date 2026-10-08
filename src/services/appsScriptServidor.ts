@@ -111,13 +111,14 @@ function norm(email) {
 // ------------------------------------------------------------------ Base de datos
 
 function vacia() {
-  return { profesores: [], alumnos: [], sanciones: [], compensaciones: [], audit_logs: [],
-           deleted_sanciones: [], deleted_alumnos: [], deleted_profesores: [], timestamp: new Date().toISOString() };
+  return { profesores: [], alumnos: [], sanciones: [], compensaciones: [], audit_logs: [], expedientes_sancion: [],
+           deleted_sanciones: [], deleted_alumnos: [], deleted_profesores: [], deleted_expedientes: [],
+           timestamp: new Date().toISOString() };
 }
 
 function asegurarListas(db) {
-  ['profesores', 'alumnos', 'sanciones', 'compensaciones', 'audit_logs',
-   'deleted_sanciones', 'deleted_alumnos', 'deleted_profesores'].forEach(function (k) {
+  ['profesores', 'alumnos', 'sanciones', 'compensaciones', 'audit_logs', 'expedientes_sancion',
+   'deleted_sanciones', 'deleted_alumnos', 'deleted_profesores', 'deleted_expedientes'].forEach(function (k) {
     if (!Array.isArray(db[k])) db[k] = [];
   });
   return db;
@@ -487,6 +488,8 @@ function vistaDocente(db, prof) {
     if (deMiTutoria[c.id_alumno]) return c;
     return soloCampos(c, ['id_compensacion', 'timestamp', 'id_alumno', 'puntos_recuperados', 'fecha_completada']);
   });
+  // Expedientes de sanción: solo los del alumnado de su tutoría
+  d.expedientes_sancion = (d.expedientes_sancion || []).filter(function (e) { return deMiTutoria[e.id_alumno]; });
   d.audit_logs = [];
   return d;
 }
@@ -563,6 +566,21 @@ function fusionAdmin(actual, entrada) {
   r.alumnos.forEach(function (a) { if (a && a.id_alumno) almIds[a.id_alumno] = true; });
   actual.alumnos.forEach(function (a) { if (a && a.id_alumno && !almBorr[a.id_alumno] && !almIds[a.id_alumno]) r.alumnos.push(a); });
   r.alumnos = r.alumnos.filter(function (a) { return a && !almBorr[a.id_alumno]; });
+
+  // Expedientes de sanción: gana la versión modificada más recientemente; se respetan los borrados
+  r.deleted_expedientes = unirTombstones(actual.deleted_expedientes, entrada.deleted_expedientes);
+  var expBorr = {};
+  r.deleted_expedientes.forEach(function (id) { expBorr[id] = true; });
+  var expMapa = {};
+  actual.expedientes_sancion.forEach(function (e) { if (e && e.id_expediente) expMapa[e.id_expediente] = e; });
+  r.expedientes_sancion.forEach(function (e) {
+    if (!e || !e.id_expediente) return;
+    var previo = expMapa[e.id_expediente];
+    if (!previo || String(e.timestamp || '') >= String(previo.timestamp || '')) expMapa[e.id_expediente] = e;
+  });
+  r.expedientes_sancion = Object.keys(expMapa)
+    .filter(function (id) { return !expBorr[id]; })
+    .map(function (id) { return expMapa[id]; });
 
   var logs = {};
   r.audit_logs.forEach(function (l) { if (l && l.id_log) logs[l.id_log] = true; });

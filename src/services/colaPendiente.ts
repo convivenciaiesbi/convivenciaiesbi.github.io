@@ -7,7 +7,7 @@
  * con la misma cuenta se reenvía. En cuanto el servidor confirma, se borra.
  */
 
-import { Alumno, Compensacion, Profesor, Sancion } from '../types/convivencia';
+import { Alumno, Compensacion, ExpedienteSancion, Profesor, Sancion } from '../types/convivencia';
 import { StorageService } from './storageService';
 
 const CLAVE_COLA = 'sigc_bi_cola_pendiente_v1';
@@ -21,6 +21,8 @@ export interface ColaPendiente {
   deleted_alumnos: string[];
   profesores: Profesor[];
   compensaciones: Compensacion[];
+  expedientes?: ExpedienteSancion[];
+  deleted_expedientes?: string[];
 }
 
 /** Construye la cola con lo que aún no ha confirmado el servidor. */
@@ -29,6 +31,7 @@ export function construirCola(email: string): ColaPendiente {
   const idsAlumnos = new Set(StorageService.getPendingSyncAlumnoIds());
   const emailsProfes = new Set(StorageService.getPendingSyncProfesorEmails());
   const idsComps = new Set(StorageService.getPendingSyncCompensacionIds());
+  const idsExp = new Set(StorageService.getPendingSyncExpedienteIds());
   return {
     email,
     fecha: new Date().toISOString(),
@@ -38,11 +41,14 @@ export function construirCola(email: string): ColaPendiente {
     deleted_alumnos: StorageService.getDeletedAlumnoIds(),
     profesores: StorageService.getProfesores().filter(p => emailsProfes.has(p.email.toLowerCase().trim())),
     compensaciones: StorageService.getCompensaciones().filter(c => idsComps.has(c.id_compensacion)),
+    expedientes: StorageService.getExpedientes().filter(e => idsExp.has(e.id_expediente)),
+    deleted_expedientes: StorageService.getDeletedExpedienteIds().filter(id => idsExp.has(id)),
   };
 }
 
 export function colaVacia(c: ColaPendiente): boolean {
-  return !c.sanciones.length && !c.alumnos.length && !c.profesores.length && !c.compensaciones.length;
+  return !c.sanciones.length && !c.alumnos.length && !c.profesores.length && !c.compensaciones.length &&
+    !(c.expedientes || []).length && !(c.deleted_expedientes || []).length;
 }
 
 /** Guarda (o borra, si no queda nada pendiente) la cola del usuario en este navegador. */
@@ -119,6 +125,14 @@ export function restaurarCola(email: string): number {
     cola.compensaciones.forEach(c => { mapa.set(c.id_compensacion, c); StorageService.addPendingSyncCompensacionId(c.id_compensacion); n++; });
     StorageService.saveCompensaciones(Array.from(mapa.values()));
   }
+  if ((cola.expedientes || []).length || (cola.deleted_expedientes || []).length) {
+    const borrados = new Set([...StorageService.getDeletedExpedienteIds(), ...(cola.deleted_expedientes || [])]);
+    StorageService.saveDeletedExpedienteIds(Array.from(borrados));
+    const mapa = new Map(StorageService.getExpedientes().map(e => [e.id_expediente, e]));
+    (cola.expedientes || []).forEach(e => { mapa.set(e.id_expediente, e); StorageService.addPendingSyncExpedienteId(e.id_expediente); n++; });
+    (cola.deleted_expedientes || []).forEach(id => { mapa.delete(id); StorageService.addPendingSyncExpedienteId(id); n++; });
+    StorageService.saveExpedientes(Array.from(mapa.values()));
+  }
   if (n > 0) StorageService.recalcularPuntosAlumnos();
   return n;
 }
@@ -128,7 +142,8 @@ export function hayCambiosSinSubir(): boolean {
     StorageService.getPendingSyncSancionIds().length > 0 ||
     StorageService.getPendingSyncAlumnoIds().length > 0 ||
     StorageService.getPendingSyncProfesorEmails().length > 0 ||
-    StorageService.getPendingSyncCompensacionIds().length > 0
+    StorageService.getPendingSyncCompensacionIds().length > 0 ||
+    StorageService.getPendingSyncExpedienteIds().length > 0
   );
 }
 
@@ -137,6 +152,7 @@ export function contarCambiosSinSubir(): number {
     StorageService.getPendingSyncSancionIds().length +
     StorageService.getPendingSyncAlumnoIds().length +
     StorageService.getPendingSyncProfesorEmails().length +
-    StorageService.getPendingSyncCompensacionIds().length
+    StorageService.getPendingSyncCompensacionIds().length +
+    StorageService.getPendingSyncExpedienteIds().length
   );
 }

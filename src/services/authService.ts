@@ -395,6 +395,7 @@ export class AuthService {
         { id: 'carnet', label: 'Carnet de Puntos', description: 'Saldos, expedientes y restitución' },
         { id: 'pac', label: 'Aula PAC', description: 'Monitor de guardia y custodia' },
         { id: 'analitica', label: 'Estadísticas & ROF', description: 'Analítica global del centro' },
+        { id: 'sanciones', label: 'Sanciones', description: 'Expedientes, trámites y parte de sanción' },
         { id: 'etl', label: 'Drive & Carga ETL', description: 'Importación Séneca y backups' },
         ...tutoria,
       ];

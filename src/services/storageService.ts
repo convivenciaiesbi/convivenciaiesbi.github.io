@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alumno, Profesor, Sancion, Compensacion, AuditLog, DriveSyncStatus, GrupoEducativo, UnidadInstitucionalConfig, MovimientoPuntos, CursoAcademicoArchivo, InfoCursoAcademico, RoleUsuario } from '../types/convivencia';
+import { ExpedienteSancion, ClaveTramiteSancion, Alumno, Profesor, Sancion, Compensacion, AuditLog, DriveSyncStatus, GrupoEducativo, UnidadInstitucionalConfig, MovimientoPuntos, CursoAcademicoArchivo, InfoCursoAcademico, RoleUsuario } from '../types/convivencia';
 import { ALUMNOS_INICIALES, PROFESORES_INICIALES, SANCIONES_INICIALES, COMPENSACIONES_INICIALES, AUDIT_LOGS_INICIALES, MOVIMIENTOS_INICIALES } from '../data/seedData';
 import { ProfesorImportRow, parsearTextoOcsvProfesores } from './odsImportService';
 import { ES_ENTORNO_PRUEBAS, CUENTA_DRIVE, CARPETA_DRIVE_ID, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
@@ -68,6 +68,9 @@ let memoryPendingSyncSanciones: string[] = [];
 let memoryPendingSyncProfesores: string[] = [];
 let memoryPendingSyncAlumnos: string[] = [];
 let memoryPendingSyncCompensaciones: string[] = [];
+let memoryExpedientes: ExpedienteSancion[] = [];
+let memoryDeletedExpedientes: string[] = [];
+let memoryPendingSyncExpedientes: string[] = [];
 let memoryLastWriteTimestamp: string | null = null;
 let memoryHasLoadedFromDrive: boolean = false;
 
@@ -180,6 +183,9 @@ export class StorageService {
     memoryPendingSyncProfesores = [];
     memoryPendingSyncAlumnos = [];
     memoryPendingSyncCompensaciones = [];
+    memoryExpedientes = [];
+    memoryDeletedExpedientes = [];
+    memoryPendingSyncExpedientes = [];
     memoryHasLoadedFromDrive = false;
   }
 
@@ -1313,6 +1319,142 @@ export class StorageService {
   static saveCompensaciones(comps: Compensacion[]): void {
     memoryCompensaciones = [...comps];
     this.touchLocalWriteTimestamp();
+  }
+
+  // ------------------------------------------------------------------ Expedientes de sanción
+
+  static getExpedientes(): ExpedienteSancion[] {
+    return [...memoryExpedientes];
+  }
+
+  static saveExpedientes(lista: ExpedienteSancion[]): void {
+    memoryExpedientes = [...lista];
+    this.touchLocalWriteTimestamp();
+  }
+
+  static getDeletedExpedienteIds(): string[] {
+    return [...memoryDeletedExpedientes];
+  }
+
+  static saveDeletedExpedienteIds(ids: string[]): void {
+    memoryDeletedExpedientes = Array.from(new Set(ids));
+  }
+
+  static getPendingSyncExpedienteIds(): string[] {
+    return [...memoryPendingSyncExpedientes];
+  }
+
+  static addPendingSyncExpedienteId(id: string): void {
+    if (id && !memoryPendingSyncExpedientes.includes(id)) memoryPendingSyncExpedientes.push(id);
+  }
+
+  static clearPendingSyncExpedienteIds(ids: string[]): void {
+    const quitar = new Set(ids);
+    memoryPendingSyncExpedientes = memoryPendingSyncExpedientes.filter(id => !quitar.has(id));
+  }
+
+  /** Abre un expediente de sanción para un alumno (Jefatura/Convivencia). */
+  static crearExpediente(
+    datos: Pick<ExpedienteSancion, 'id_alumno' | 'conducta_art37' | 'fecha_desde' | 'fecha_hasta' | 'dias_acude' | 'modalidad' | 'fecha_documento'>,
+    usuarioEmail: string
+  ): ExpedienteSancion {
+    const ahora = new Date().toISOString();
+    const vacio = { hecho: false };
+    const exp: ExpedienteSancion = {
+      ...datos,
+      id_expediente: `exp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      fecha_creacion: ahora,
+      creado_por: usuarioEmail,
+      timestamp: ahora,
+      tramites: {
+        llamada_familia: { ...vacio },
+        enviado_direccion: { ...vacio },
+        enviado_familia: { ...vacio },
+        aviso_equipo_docente: { ...vacio },
+      },
+      completado: false,
+    };
+    this.saveExpedientes([exp, ...this.getExpedientes()]);
+    this.addPendingSyncExpedienteId(exp.id_expediente);
+    const al = this.getAlumnos().find(a => a.id_alumno === datos.id_alumno);
+    this.addAuditLog(usuarioEmail, 'ACTUALIZACION_SISTEMA', `ExpedienteSancion/${exp.id_expediente}`,
+      `Expediente de sanción abierto para ${al ? `${al.nombre} ${al.apellidos} (${al.grupo})` : datos.id_alumno}.`);
+    return exp;
+  }
+
+  /** Modifica los datos de un expediente (fechas, conducta, modalidad…). */
+  static actualizarExpediente(id: string, cambios: Partial<ExpedienteSancion>, usuarioEmail: string): ExpedienteSancion | null {
+    const lista = this.getExpedientes();
+    const i = lista.findIndex(e => e.id_expediente === id);
+    if (i === -1) return null;
+    const { id_expediente, fecha_creacion, creado_por, tramites, ...permitidos } = cambios as any;
+    lista[i] = { ...lista[i], ...permitidos, timestamp: new Date().toISOString() };
+    this.saveExpedientes(lista);
+    this.addPendingSyncExpedienteId(id);
+    return lista[i];
+  }
+
+  /** Marca o desmarca un trámite; el expediente queda completado cuando están los cuatro. */
+  static marcarTramite(id: string, clave: ClaveTramiteSancion, hecho: boolean, usuarioEmail: string): ExpedienteSancion | null {
+    const lista = this.getExpedientes();
+    const i = lista.findIndex(e => e.id_expediente === id);
+    if (i === -1) return null;
+    const ahora = new Date().toISOString();
+    const exp = { ...lista[i], tramites: { ...lista[i].tramites } };
+    exp.tramites[clave] = hecho ? { hecho: true, fecha: ahora, por: usuarioEmail } : { hecho: false };
+    const todos = Object.values(exp.tramites).every(t => t.hecho);
+    exp.completado = todos;
+    exp.fecha_completado = todos ? (lista[i].fecha_completado || ahora) : undefined;
+    exp.timestamp = ahora;
+    lista[i] = exp;
+    this.saveExpedientes(lista);
+    this.addPendingSyncExpedienteId(id);
+    return exp;
+  }
+
+  /** Marca todos los trámites como hechos y cierra el expediente. */
+  static completarExpediente(id: string, usuarioEmail: string): ExpedienteSancion | null {
+    const lista = this.getExpedientes();
+    const i = lista.findIndex(e => e.id_expediente === id);
+    if (i === -1) return null;
+    const ahora = new Date().toISOString();
+    const exp = { ...lista[i], tramites: { ...lista[i].tramites } };
+    (Object.keys(exp.tramites) as ClaveTramiteSancion[]).forEach(k => {
+      if (!exp.tramites[k].hecho) exp.tramites[k] = { hecho: true, fecha: ahora, por: usuarioEmail };
+    });
+    exp.completado = true;
+    exp.fecha_completado = ahora;
+    exp.timestamp = ahora;
+    lista[i] = exp;
+    this.saveExpedientes(lista);
+    this.addPendingSyncExpedienteId(id);
+    this.addAuditLog(usuarioEmail, 'ACTUALIZACION_SISTEMA', `ExpedienteSancion/${id}`, 'Todos los trámites del expediente de sanción marcados como completados.');
+    return exp;
+  }
+
+  static eliminarExpediente(id: string, usuarioEmail: string): void {
+    this.saveExpedientes(this.getExpedientes().filter(e => e.id_expediente !== id));
+    this.saveDeletedExpedienteIds([...this.getDeletedExpedienteIds(), id]);
+    this.addPendingSyncExpedienteId(id);
+    this.addAuditLog(usuarioEmail, 'ACTUALIZACION_SISTEMA', `ExpedienteSancion/${id}`, 'Expediente de sanción eliminado.');
+  }
+
+  /**
+   * Alumnado con 0 puntos que todavía no tiene un expediente abierto desde que llegó a 0
+   * (es decir, ninguno creado después de su último parte con puntos).
+   */
+  static getAlumnosPendientesDeExpediente(): Alumno[] {
+    const expedientes = this.getExpedientes();
+    const sanciones = this.getActiveSanciones();
+    return this.getAlumnos().filter(a => {
+      if (a.estado === 'BAJA' || a.puntos_actuales !== 0) return false;
+      const ultimoParte = sanciones
+        .filter(s => s.id_alumno === a.id_alumno && (s.puntos_restados || 0) > 0)
+        .map(s => s.fecha)
+        .sort()
+        .pop() || '';
+      return !expedientes.some(e => e.id_alumno === a.id_alumno && e.fecha_creacion.substring(0, 10) >= ultimoParte);
+    });
   }
 
   static getAuditLogs(): AuditLog[] {

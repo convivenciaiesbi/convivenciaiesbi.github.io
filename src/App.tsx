@@ -55,7 +55,7 @@ import {
 import { 
   GoogleDriveSyncService 
 } from './services/googleDriveSyncService';
-import { 
+import { ExpedienteSancion, 
   Alumno, 
   Profesor, 
   Sancion, 
@@ -78,6 +78,7 @@ import {
 import { EntornoBanner } from './components/EntornoBanner';
 import { AvisoGuardado } from './components/AvisoGuardado';
 import { TutoriaView } from './components/TutoriaView';
+import { SancionesView } from './components/SancionesView';
 import { EVENTO_SESION_CADUCADA } from './services/apiService';
 import { guardarCola, hayCambiosSinSubir, contarCambiosSinSubir } from './services/colaPendiente';
 import { CUENTA_DRIVE } from './config/entorno';
@@ -134,6 +135,7 @@ export default function App() {
   const [sanciones, setSanciones] = useState<Sancion[]>([]);
   const [compensaciones, setCompensaciones] = useState<Compensacion[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [expedientes, setExpedientes] = useState<ExpedienteSancion[]>([]);
 
   // Modals state
   const [printableParte, setPrintableParte] = useState<Sancion | null>(null);
@@ -201,6 +203,7 @@ export default function App() {
     setSanciones(StorageService.getSanciones());
     setCompensaciones(StorageService.getCompensaciones());
     setAuditLogs(StorageService.getAuditLogs());
+    setExpedientes(StorageService.getExpedientes());
   };
 
   // Mantener el usuario de la sesión al día si Jefatura cambia su tutoría o su rol
@@ -591,11 +594,25 @@ export default function App() {
         )}
 
         {/* Historial Individual de Partes para el Profesorado Docente */}
+        {isAdmin && currentView === 'sanciones' && (
+          <SancionesView
+            currentUser={currentUser}
+            alumnos={alumnos}
+            expedientes={expedientes}
+            onDataChanged={() => {
+              refreshAllData();
+              notifyLocalSync();
+              GoogleDriveSyncService.triggerFastSync(150);
+            }}
+          />
+        )}
+
         {currentView === 'tutoria' && currentUser.tutor_de_grupo && (
           <TutoriaView
             currentUser={currentUser}
             alumnos={alumnos}
             sanciones={sanciones}
+            expedientes={expedientes}
             onPrintParte={(sancion) => setPrintableParte(sancion)}
           />
         )}

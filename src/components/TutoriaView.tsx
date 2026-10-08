@@ -5,13 +5,16 @@
 
 import React, { useMemo, useState } from 'react';
 import { Users, Phone, Printer, ChevronDown, ChevronUp, AlertTriangle, School } from 'lucide-react';
-import { Alumno, Profesor, Sancion, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
+import { Alumno, ExpedienteSancion, Profesor, Sancion, LISTA_GRUPOS_OFICIALES } from '../types/convivencia';
+import { TRAMITES_SANCION, MODALIDADES_SANCION, textoConductaArt37 } from '../data/sancionesArt37';
+import { fechaLarga } from '../utils/parteSancionPdf';
 import { CATALOGO_CONDUCTAS_V0, MATRIZ_ROF_CATALOG } from '../data/rofCatalog';
 
 interface TutoriaViewProps {
   currentUser: Profesor;
   alumnos: Alumno[];
   sanciones: Sancion[];
+  expedientes?: ExpedienteSancion[];
   onPrintParte: (sancion: Sancion) => void;
 }
 
@@ -46,7 +49,7 @@ function fechaLegible(f: string): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : f;
 }
 
-export const TutoriaView: React.FC<TutoriaViewProps> = ({ currentUser, alumnos, sanciones, onPrintParte }) => {
+export const TutoriaView: React.FC<TutoriaViewProps> = ({ currentUser, alumnos, sanciones, expedientes = [], onPrintParte }) => {
   const grupo = currentUser.tutor_de_grupo || '';
   const etiquetaGrupo = LISTA_GRUPOS_OFICIALES.find((g) => g.codigo === grupo)?.etiqueta || grupo;
   const [alumnoFiltro, setAlumnoFiltro] = useState<string>('');
@@ -74,6 +77,11 @@ export const TutoriaView: React.FC<TutoriaViewProps> = ({ currentUser, alumnos, 
     partesGrupo.forEach((s) => m.set(s.id_alumno, (m.get(s.id_alumno) || 0) + 1));
     return m;
   }, [partesGrupo]);
+
+  const expedientesGrupo = useMemo(
+    () => expedientes.filter((e) => idsGrupo.has(e.id_alumno)).sort((a, b) => b.fecha_creacion.localeCompare(a.fecha_creacion)),
+    [expedientes, idsGrupo]
+  );
 
   const partesVisibles = alumnoFiltro ? partesGrupo.filter((s) => s.id_alumno === alumnoFiltro) : partesGrupo;
   const enAlerta = alumnosGrupo.filter((a) => a.puntos_actuales <= 3).length;
@@ -124,6 +132,38 @@ export const TutoriaView: React.FC<TutoriaViewProps> = ({ currentUser, alumnos, 
           </div>
         )}
       </div>
+
+      {/* Expedientes de sanción del grupo (solo lectura) */}
+      {expedientesGrupo.length > 0 && (
+        <div className="bg-white border border-sky-100 rounded-2xl shadow-xs">
+          <div className="px-5 py-3 border-b border-sky-100 text-sm font-bold text-slate-800">Sanciones de tu grupo ({expedientesGrupo.length})</div>
+          <ul className="divide-y divide-slate-100">
+            {expedientesGrupo.map((e) => {
+              const al = alumnoPorId.get(e.id_alumno);
+              const hechos = TRAMITES_SANCION.filter((t) => e.tramites[t.clave]?.hecho).length;
+              return (
+                <li key={e.id_expediente} className="p-4 text-xs space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-semibold text-slate-900">{al ? `${al.apellidos}, ${al.nombre}` : 'Alumno/a'}</span>
+                    <span className={`font-bold px-2 py-0.5 rounded-full ${e.completado ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}`}>
+                      {e.completado ? 'Trámites completados' : `Trámites: ${hechos}/${TRAMITES_SANCION.length}`}
+                    </span>
+                  </div>
+                  <div className="text-slate-600">
+                    Del {fechaLarga(e.fecha_desde)} al {fechaLarga(e.fecha_hasta)} · {MODALIDADES_SANCION.find((m) => m.valor === e.modalidad)?.etiqueta}
+                  </div>
+                  <div className="text-slate-500">Art. 37.{e.conducta_art37}: {textoConductaArt37(e.conducta_art37)}</div>
+                  <ul className="text-slate-600 grid sm:grid-cols-2 gap-x-4">
+                    {TRAMITES_SANCION.map((t) => (
+                      <li key={t.clave}>{e.tramites[t.clave]?.hecho ? '✅' : '⬜'} {t.etiqueta}</li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {/* Alumnado del grupo */}
       <div className="bg-white border border-sky-100 rounded-2xl shadow-xs overflow-hidden">

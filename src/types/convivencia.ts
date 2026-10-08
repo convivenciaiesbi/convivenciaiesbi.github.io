@@ -296,6 +296,35 @@ export interface Compensacion {
   fecha_completada: string;
 }
 
+/** Trámite de un expediente de sanción: quién lo marcó y cuándo. */
+export interface TramiteSancion {
+  hecho: boolean;
+  fecha?: string; // ISO
+  por?: string; // correo de quien lo marcó
+}
+
+export type ClaveTramiteSancion = 'llamada_familia' | 'enviado_direccion' | 'enviado_familia' | 'aviso_equipo_docente';
+
+export type ModalidadSancion = 'AULA_CONVIVENCIA' | 'EXPULSION';
+
+/** Expediente de sanción (alumnado que llega a 0 puntos u otras sanciones de Dirección). */
+export interface ExpedienteSancion {
+  id_expediente: string;
+  id_alumno: string;
+  fecha_creacion: string; // ISO
+  creado_por: string; // correo
+  timestamp: string; // ISO de la última modificación
+  conducta_art37: number; // 1..11 (Decreto 327/2010, art. 37)
+  fecha_desde: string; // YYYY-MM-DD
+  fecha_hasta: string; // YYYY-MM-DD
+  dias_acude: string; // texto libre: días en que acude al centro
+  modalidad: ModalidadSancion;
+  fecha_documento: string; // YYYY-MM-DD
+  tramites: Record<ClaveTramiteSancion, TramiteSancion>;
+  completado: boolean;
+  fecha_completado?: string;
+}
+
 export interface AuditLog {
   id_log: string;
   timestamp: string;
