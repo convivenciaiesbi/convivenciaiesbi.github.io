@@ -201,19 +201,13 @@ export async function generateOfficialSancionPdf(
     doc.setFont('helvetica', 'bold');
     doc.text(alumno.nie || 'Sin NIE', marginX + 54, curY + 15);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text('Carnet Puntos:', marginX + 3, curY + 20);
-    doc.setFont('helvetica', 'bold');
-    const colorCarnet = alumno.puntos_actuales === 0 ? [225, 29, 72] : alumno.puntos_actuales <= 3 ? [217, 119, 6] : [3, 105, 161];
-    doc.setTextColor(colorCarnet[0], colorCarnet[1], colorCarnet[2]);
-    doc.text(`${alumno.puntos_actuales} / 10 pts (${alumno.estado === 'SALDO_CERO' ? 'Saldo Cero' : alumno.estado === 'ALERTA_PUNTOS' ? 'Alerta Puntos' : 'Activo'})`, marginX + 24, curY + 20);
-
+    // Por decisión del centro, el parte no muestra el saldo de puntos del alumno
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'normal');
-    doc.text('Tutor Legal / Tel.:', marginX + 3, curY + 25);
+    doc.text('Tutor Legal / Tel.:', marginX + 3, curY + 20);
     doc.setFont('helvetica', 'bold');
     const tutorTexto = `${alumno.nombre_tutor || 'Tutor Legal'} (${alumno.telefono_tutor || 'No registrado'})`;
-    doc.text(tutorTexto.length > 32 ? tutorTexto.substring(0, 30) + '...' : tutorTexto, marginX + 26, curY + 25);
+    doc.text(tutorTexto.length > 32 ? tutorTexto.substring(0, 30) + '...' : tutorTexto, marginX + 26, curY + 20);
 
     // Box Right: Profesor / Hecho
     const rightColX = marginX + colWidth + 4;
@@ -252,10 +246,6 @@ export async function generateOfficialSancionPdf(
     // --- 3. Section: Tipificación Normativa y Calificación de la Conducta (V0 - Sección 6) ---
     const tipif = obtenerTipificacionNormativa(sancion.codigo_infraccion);
     const puntosDeducidos = Math.max(0, sancion.puntos_restados || 0);
-    const saldoAnt = sancion.saldo_anterior !== undefined 
-      ? sancion.saldo_anterior 
-      : Math.min(10, (alumno.puntos_actuales || 10) + puntosDeducidos);
-    const saldoRes = Math.max(0, saldoAnt - puntosDeducidos);
 
     doc.setFillColor(254, 242, 242); // rose-50
     doc.setDrawColor(254, 202, 202); // rose-200
@@ -279,7 +269,7 @@ export async function generateOfficialSancionPdf(
     doc.setTextColor(71, 85, 105);
     doc.text(`Fundamento legal: ${tipif.tipoTexto} · [${tipif.referencia}]`, marginX + 3, curY + 16);
 
-    // Sistema interno de puntos: pérdida asociada, saldo anterior y saldo resultante
+    // Puntos de este parte (sin mostrar los puntos que le quedan al alumno)
     doc.setFillColor(255, 255, 255);
     doc.roundedRect(marginX + 2, curY + 18.5, contentWidth - 4, 6, 1, 1, 'F');
     doc.setTextColor(190, 18, 60);
@@ -289,15 +279,6 @@ export async function generateOfficialSancionPdf(
       ? `Deducción en este parte: -${puntosDeducidos} pts` 
       : 'Incidencia académica: 0 pts';
     doc.text(puntosTexto, marginX + 4, curY + 22.5);
-
-    doc.setTextColor(51, 65, 85);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Saldo previo: ${saldoAnt} / 10 pts`, marginX + 70, curY + 22.5);
-
-    doc.setFont('helvetica', 'bold');
-    const colorRes = saldoRes === 0 ? [225, 29, 72] : saldoRes <= 3 ? [217, 119, 6] : [3, 105, 161];
-    doc.setTextColor(colorRes[0], colorRes[1], colorRes[2]);
-    doc.text(`Saldo tras este parte: ${saldoRes} / 10 pts`, pageWidth - marginX - 5, curY + 22.5, { align: 'right' });
 
     curY += 29;
 
@@ -354,7 +335,7 @@ export async function generateOfficialSancionPdf(
     // --- 6. Información a la Familia y Régimen de Notificación (V0) ---
     doc.setFillColor(241, 245, 249);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(marginX, curY, contentWidth, 16, 1.5, 1.5, 'FD');
+    doc.roundedRect(marginX, curY, contentWidth, 9.5, 1.5, 1.5, 'FD');
 
     doc.setTextColor(15, 23, 42);
     doc.setFont('helvetica', 'bold');
@@ -365,17 +346,10 @@ export async function generateOfficialSancionPdf(
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.setTextColor(71, 85, 105);
-    const disclaimer1 = '1. Se comunica la deducción de puntos conforme al catálogo oficial V0 del Plan de Convivencia del IES Blas Infante.';
-    const disclaimer2 = '2. La aplicación registra y calcula los saldos mecánicamente. Las decisiones disciplinarias ulteriores corresponden a Jefatura de Estudios y Dirección.';
-    const disclaimer3 = '3. Si el alumno permanece una semana sin incidencias disciplinarias, recupera automáticamente +1 punto (hasta un máximo de 10).';
-    const disclaimer4 = '4. Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios para cualquier aclaración.';
+    const avisoFamilia = 'Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios para cualquier aclaración.';
+    doc.text(avisoFamilia, marginX + 3, curY + 7.5);
 
-    doc.text(disclaimer1, marginX + 3, curY + 7);
-    doc.text(disclaimer2, marginX + 3, curY + 9.5);
-    doc.text(disclaimer3, marginX + 3, curY + 12);
-    doc.text(disclaimer4, marginX + 3, curY + 14.5);
-
-    curY += 19;
+    curY += 12.5;
 
     // --- 8. Official Signatures (3 columns) ---
     const sigColWidth = (contentWidth - 8) / 3; // ~58mm each

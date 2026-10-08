@@ -64,4 +64,7 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       Jefatura ve "(indicada por el docente)" y puede cambiarla. El servidor aplica las mismas reglas.
 - [x] **Restitución manual de puntos**: Jefatura/Convivencia escribe directamente de 1 a 10 puntos
       (campo numérico), con atajo "Completar hasta 10" y aviso si se supera el máximo.
+- [x] **Parte en PDF / impresión**: no muestra los puntos que le quedan al alumno (ni saldo actual,
+      ni saldo previo ni resultante); solo la deducción de ese parte. El apartado 6 contiene únicamente
+      "Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios…".
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.

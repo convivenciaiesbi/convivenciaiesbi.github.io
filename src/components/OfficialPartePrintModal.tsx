@@ -299,18 +299,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                       <span>Grupo: <strong>{currentAlumno.grupo}</strong></span>
                       <span>NIE: <strong>{currentAlumno.nie}</strong></span>
                     </div>
-                    <div className="flex justify-between items-center text-[11px] pt-1 border-t border-slate-200">
-                      <span className="text-slate-500 font-medium">Saldo global hoy:</span>
-                      <span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[10px] ${
-                        currentAlumno.puntos_actuales === 0
-                          ? 'bg-rose-100 text-rose-800'
-                          : currentAlumno.puntos_actuales <= 3
-                          ? 'bg-amber-100 text-amber-900'
-                          : 'bg-sky-100 text-sky-900'
-                      }`}>
-                        {currentAlumno.puntos_actuales} / 10 pts ({currentAlumno.estado === 'SALDO_CERO' ? 'Saldo Cero' : currentAlumno.estado === 'ALERTA_PUNTOS' ? 'Alerta' : 'Activo'})
-                      </span>
-                    </div>
                     <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
                       Tutor/a Legal: {currentAlumno.nombre_tutor} ({currentAlumno.telefono_tutor})
                     </div>
@@ -336,10 +324,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                 {(() => {
                   const tipif = obtenerTipificacionNormativa(currentSancion.codigo_infraccion);
                   const puntosDeducidos = Math.max(0, currentSancion.puntos_restados || 0);
-                  const saldoAnt = currentSancion.saldo_anterior !== undefined 
-                    ? currentSancion.saldo_anterior 
-                    : Math.min(10, currentAlumno.puntos_actuales + puntosDeducidos);
-                  const saldoRes = Math.max(0, saldoAnt - puntosDeducidos);
 
                   return (
                     <div className="border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
@@ -367,9 +351,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                           Deducción en este parte: <strong className={puntosDeducidos > 0 ? 'text-rose-700' : 'text-slate-700'}>
                             {puntosDeducidos > 0 ? `-${puntosDeducidos} puntos` : '0 puntos (Incidencia académica)'}
                           </strong>
-                        </div>
-                        <div>
-                          Evolución en este parte: {saldoAnt} → <strong className={saldoRes <= 3 ? 'text-rose-700' : 'text-sky-800'}>{saldoRes} / 10 pts</strong>
                         </div>
                       </div>
                     </div>
@@ -410,7 +391,7 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                 {/* 5. Comunicación Legal a las Familias */}
                 <div className="text-[10px] text-slate-500 space-y-1 border-t border-slate-200 pt-2">
                   <p>
-                    <strong>Aviso a los representantes legales:</strong> Se comunica la deducción de puntos conforme al catálogo oficial V0 del Plan de Convivencia del IES Blas Infante. La aplicación no impone decisiones de expulsión; si el saldo del carnet alcanza los 0 puntos, se elevará a la Jefatura de Estudios para la adopción de las medidas correctoras oportunas. Se puede solicitar cita con la tutoría o con Jefatura. Fecha de notificación: <strong>{currentSancion.fecha_comunicacion_familia || currentSancion.fecha}</strong>.
+                    <strong>Información y comunicación a la familia (fecha: {currentSancion.fecha_comunicacion_familia || currentSancion.fecha}):</strong> Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios para cualquier aclaración.
                   </p>
                 </div>
 
