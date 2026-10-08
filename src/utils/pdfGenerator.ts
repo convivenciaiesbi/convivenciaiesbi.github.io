@@ -351,42 +351,7 @@ export async function generateOfficialSancionPdf(
 
     curY += 12.5;
 
-    // --- 8. Official Signatures (3 columns) ---
-    const sigColWidth = (contentWidth - 8) / 3; // ~58mm each
-    const sigY = curY;
-
-    // Column 1: Teacher
-    doc.setDrawColor(148, 163, 184); // slate-400
-    doc.line(marginX, sigY + 18, marginX + sigColWidth, sigY + 18);
-    doc.setTextColor(71, 85, 105);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text('El/La Profesor/a Actuante', marginX + sigColWidth / 2, sigY + 22, { align: 'center' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.text(`Fdo: ${sancion.nombre_profesor}`, marginX + sigColWidth / 2, sigY + 26, { align: 'center' });
-
-    // Column 2: Jefatura de Estudios / Stamp
-    const col2X = marginX + sigColWidth + 4;
-    doc.line(col2X, sigY + 18, col2X + sigColWidth, sigY + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text('Jefatura de Estudios / Convivencia', col2X + sigColWidth / 2, sigY + 22, { align: 'center' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.text('(Vº Bº y Sello del Centro)', col2X + sigColWidth / 2, sigY + 26, { align: 'center' });
-
-    // Column 3: Parent signature
-    const col3X = marginX + (sigColWidth + 4) * 2;
-    doc.line(col3X, sigY + 18, col3X + sigColWidth, sigY + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.text('Enterado: Padre / Madre / Tutor Legal', col3X + sigColWidth / 2, sigY + 22, { align: 'center' });
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.5);
-    doc.text('Firma y Fecha de Recepción', col3X + sigColWidth / 2, sigY + 26, { align: 'center' });
-
-    curY += 32;
+    // Por decisión del centro, el parte no incluye espacio para firmas
 
     // --- 9. Document Footer & Verification Bar ---
     doc.setDrawColor(226, 232, 240);

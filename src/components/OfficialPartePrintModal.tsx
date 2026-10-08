@@ -395,36 +395,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                   </p>
                 </div>
 
-                {/* 6. Bloque de Firmas Oficiales */}
-                <div className="grid grid-cols-3 gap-4 pt-6 text-center text-xs">
-                  <div className="space-y-12">
-                    <div className="font-bold text-slate-700 text-[11px]">
-                      El/La Profesor/a Actuante
-                    </div>
-                    <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 font-mono">
-                      Fdo.: {currentSancion.nombre_profesor}
-                    </div>
-                  </div>
-
-                  <div className="space-y-12">
-                    <div className="font-bold text-slate-700 text-[11px]">
-                      Jefatura de Estudios / Convivencia
-                    </div>
-                    <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 font-mono">
-                      Sello del Centro y Vº Bº
-                    </div>
-                  </div>
-
-                  <div className="space-y-12">
-                    <div className="font-bold text-slate-700 text-[11px]">
-                      Enterado Padre / Madre / Tutor Legal
-                    </div>
-                    <div className="border-t border-slate-400 pt-1 text-[10px] text-slate-500 font-mono">
-                      Firma y Fecha de Notificación
-                    </div>
-                  </div>
-                </div>
-
                 {/* Drive Link & Verification Code */}
                 <div className="flex justify-between items-center pt-4 border-t border-slate-200 text-[9px] font-mono text-slate-400">
                   <span>Documento custodiado en Google Drive: {currentSancion.url_pdf_drive}</span>

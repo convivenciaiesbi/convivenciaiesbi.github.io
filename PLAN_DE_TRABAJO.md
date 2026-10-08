@@ -67,4 +67,5 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 - [x] **Parte en PDF / impresión**: no muestra los puntos que le quedan al alumno (ni saldo actual,
       ni saldo previo ni resultante); solo la deducción de ese parte. El apartado 6 contiene únicamente
       "Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios…".
+      Sin espacio para firmas.
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.
