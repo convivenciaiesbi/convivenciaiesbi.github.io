@@ -13,7 +13,7 @@ export const PROFESORES_INICIALES: Profesor[] = [
     email: 'mgonruz857@g.educaand.es',
     nombre: 'Miguel Ángel',
     apellidos: 'González Ruz',
-    dni: '30998812W',
+    dni: '',
     departamento: 'Matemáticas / Convivencia',
     rol: 'ROLE_CONVIVENCIA_ADMIN',
     tutor_de_grupo: '1ESO_A',

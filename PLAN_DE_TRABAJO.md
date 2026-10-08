@@ -14,7 +14,7 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 
 ## 🔒 Fase 1 – Seguridad
 
-- [ ] Quitar el DNI y datos personales del código público (`src/data/seedData.ts`).
+- [x] Quitar el DNI del código público (`src/data/seedData.ts`). Sigue en el historial de versiones antiguas.
 - [ ] Programa de Apps Script: no devolver las contraseñas (hashes) a quien lea los datos
       y no permitir guardar datos mediante GET.
 - [ ] Acceso real: que el programa de Apps Script compruebe quién hace cada petición
