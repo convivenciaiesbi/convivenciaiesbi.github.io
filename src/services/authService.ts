@@ -377,6 +377,7 @@ export class AuthService {
     // 1. Poner infracciones ('imponer')
     // 2. Ver su propio historial de partes puestos ('mis_partes')
     // 3. Ver y atender alumnado en Aula PAC ('pac')
+    if (viewId === 'tutoria') return Boolean(user.tutor_de_grupo);
     return viewId === 'imponer' || viewId === 'mis_partes' || viewId === 'pac';
   }
 
@@ -384,6 +385,9 @@ export class AuthService {
    * Returns list of view navigation IDs available for this user
    */
   static getAllowedNavItems(user: Profesor | null): { id: string; label: string; description: string }[] {
+    const tutoria = user?.tutor_de_grupo
+      ? [{ id: 'tutoria', label: 'Mi Tutoría', description: 'Partes y alumnado de mi grupo' }]
+      : [];
     if (this.isAdmin(user)) {
       return [
         { id: 'imponer', label: 'Imponer Infracción', description: 'Registro rápido <30s' },
@@ -392,6 +396,7 @@ export class AuthService {
         { id: 'pac', label: 'Aula PAC', description: 'Monitor de guardia y custodia' },
         { id: 'analitica', label: 'Estadísticas & ROF', description: 'Analítica global del centro' },
         { id: 'etl', label: 'Drive & Carga ETL', description: 'Importación Séneca y backups' },
+        ...tutoria,
       ];
     }
 
@@ -400,6 +405,7 @@ export class AuthService {
       { id: 'imponer', label: 'Imponer Infracción', description: 'Registro rápido <30s de partes' },
       { id: 'mis_partes', label: 'Mis Partes Puestos', description: 'Historial individual y estado de trámite' },
       { id: 'pac', label: 'Aula PAC (Atención)', description: 'Alumnado derivado en guardia' },
+      ...tutoria,
     ];
   }
 }

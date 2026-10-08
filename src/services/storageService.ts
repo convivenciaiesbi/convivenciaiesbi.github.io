@@ -908,6 +908,9 @@ export class StorageService {
       rol: datos.rol !== undefined ? datos.rol : (anterior.rol || 'ROLE_DOCENTE'),
       tutor_de_grupo: datos.tutor_de_grupo ? datos.tutor_de_grupo : undefined,
     };
+    if ((profesorActualizado.tutor_de_grupo || '') !== (anterior.tutor_de_grupo || '')) {
+      profesorActualizado.tutoria_asignada_por = profesorActualizado.tutor_de_grupo ? 'JEFATURA' : undefined;
+    }
 
     profesores[profIndex] = profesorActualizado;
     this.saveProfesores(profesores);
@@ -967,12 +970,27 @@ export class StorageService {
       return { success: false, error: 'Los apellidos son obligatorios.' };
     }
 
+    const nuevaTutoria = datos.tutor_de_grupo && datos.tutor_de_grupo.trim() ? datos.tutor_de_grupo.trim() : undefined;
+    const cambiaTutoria = (nuevaTutoria || '') !== (anterior.tutor_de_grupo || '');
+    if (cambiaTutoria && nuevaTutoria) {
+      const ocupado = profesores.find(
+        p => p.email.toLowerCase() !== cleanEmail && p.estado !== 'INACTIVO' && p.tutor_de_grupo === nuevaTutoria
+      );
+      if (ocupado) {
+        return {
+          success: false,
+          error: `El grupo ya tiene tutor/a asignado (${ocupado.nombre} ${ocupado.apellidos}). Si debe cambiarse, pídeselo a Jefatura de Estudios.`,
+        };
+      }
+    }
+
     const profesorActualizado: Profesor = {
       ...anterior,
       nombre: datos.nombre.trim(),
       apellidos: datos.apellidos.trim(),
       departamento: datos.departamento.trim() || 'Claustro Docente',
-      tutor_de_grupo: datos.tutor_de_grupo && datos.tutor_de_grupo.trim() ? datos.tutor_de_grupo.trim() : undefined,
+      tutor_de_grupo: nuevaTutoria,
+      tutoria_asignada_por: cambiaTutoria ? (nuevaTutoria ? 'DOCENTE' : undefined) : anterior.tutoria_asignada_por,
     };
 
     profesores[profIndex] = profesorActualizado;

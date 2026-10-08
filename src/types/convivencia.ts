@@ -14,6 +14,7 @@ export interface Profesor {
   departamento: string;
   rol: RoleUsuario;
   tutor_de_grupo?: string; // e.g. "1ESO_A"
+  tutoria_asignada_por?: 'JEFATURA' | 'DOCENTE'; // quién asignó la tutoría
   estado?: 'ACTIVO' | 'INACTIVO'; // Permite dar de baja profesores que ya no están en el centro
   motivo_baja?: string;
   fecha_baja?: string;

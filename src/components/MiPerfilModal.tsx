@@ -96,15 +96,25 @@ export const MiPerfilModal: React.FC<MiPerfilModalProps> = ({
       setIsLoading(false);
 
       if (res.success && res.profesor) {
-        GoogleDriveSyncService.pushToGoogleDrive().catch(() => {});
-        setFeedback({
-          type: 'success',
-          message: '¡Tus datos de perfil docente han sido actualizados y sincronizados en Google Drive correctamente!'
-        });
-        onProfileUpdated(res.profesor);
-        setTimeout(() => {
-          onClose();
-        }, 1200);
+        const profesorGuardado = res.profesor;
+        setIsLoading(true);
+        GoogleDriveSyncService.pushToGoogleDrive()
+          .then((envio) => {
+            setIsLoading(false);
+            if (envio.avisos && envio.avisos.length) {
+              setFeedback({ type: 'error', message: envio.avisos.join(' ') });
+              return;
+            }
+            setFeedback({
+              type: 'success',
+              message: envio.success
+                ? 'Tus datos de perfil se han guardado en Google Drive.'
+                : 'Tus datos se han guardado en este dispositivo y se enviarán a Google Drive en cuanto haya conexión.',
+            });
+            onProfileUpdated(profesorGuardado);
+            setTimeout(() => onClose(), 1200);
+          })
+          .catch(() => setIsLoading(false));
       } else {
         setFeedback({
           type: 'error',
@@ -300,7 +310,7 @@ export const MiPerfilModal: React.FC<MiPerfilModalProps> = ({
                 </select>
               </div>
               <p className="text-[10px] text-slate-500 mt-1">
-                Si eres tutor/a lectivo de un grupo, selecciónalo aquí para acceder a los informes de seguimiento tutorial.
+                Si eres tutor/a de un grupo, selecciónalo aquí para ver en "Mi Tutoría" todos los partes de tu grupo. Solo puedes elegir un grupo que no tenga ya tutor; si no, pídeselo a Jefatura.
               </p>
             </div>
 

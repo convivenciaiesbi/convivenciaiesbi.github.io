@@ -405,7 +405,7 @@ export class GoogleDriveSyncService {
    * Antes de subir, realiza una lectura y fusión atómica (Read-Modify-Write) desde Drive
    * para garantizar que dos dispositivos simultáneos nunca sobrescriban los cambios del otro.
    */
-  static async pushToGoogleDrive(): Promise<{ success: boolean; message: string }> {
+  static async pushToGoogleDrive(): Promise<{ success: boolean; message: string; avisos?: string[] }> {
     const apiUrl = this.getSyncApiUrl();
 
     if (!apiUrl) {
@@ -465,7 +465,12 @@ export class GoogleDriveSyncService {
       this.lastPushError = null;
       this.avisarEstadoGuardado(true);
       this.finishPush();
-      return { success: true, message: 'Datos guardados en Google Drive.' };
+      const avisos: string[] = Array.isArray(respuesta.avisos) ? respuesta.avisos : [];
+      if (avisos.length) {
+        // El servidor no ha aceptado algún cambio: volver a descargar el estado real
+        setTimeout(() => this.pullFromGoogleDrive({ forceRefresh: true }).catch(() => {}), 100);
+      }
+      return { success: true, message: 'Datos guardados en Google Drive.', avisos };
     }
 
     this.lastPushError = respuesta.error || 'Error desconocido al guardar.';

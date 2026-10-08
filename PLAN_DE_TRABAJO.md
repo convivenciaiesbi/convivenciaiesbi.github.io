@@ -58,4 +58,8 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 
 ## ✨ Fase 3 – Nuevas funcionalidades
 
-- [ ] (Pendiente de que Miguel Ángel las detalle)
+- [x] **Mi Tutoría**: el tutor/a ve todos los partes de su grupo completos (solo lectura), el saldo
+      de su alumnado, las medidas restaurativas y los teléfonos de las familias de su grupo.
+      La tutoría la asigna Jefatura o el propio docente en su perfil (solo si el grupo no tiene tutor);
+      Jefatura ve "(indicada por el docente)" y puede cambiarla. El servidor aplica las mismas reglas.
+- [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.

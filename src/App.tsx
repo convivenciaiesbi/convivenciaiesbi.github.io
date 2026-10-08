@@ -77,6 +77,7 @@ import {
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
 import { AvisoGuardado } from './components/AvisoGuardado';
+import { TutoriaView } from './components/TutoriaView';
 import { EVENTO_SESION_CADUCADA } from './services/apiService';
 import { guardarCola, hayCambiosSinSubir, contarCambiosSinSubir } from './services/colaPendiente';
 import { CUENTA_DRIVE } from './config/entorno';
@@ -201,6 +202,20 @@ export default function App() {
     setCompensaciones(StorageService.getCompensaciones());
     setAuditLogs(StorageService.getAuditLogs());
   };
+
+  // Mantener el usuario de la sesión al día si Jefatura cambia su tutoría o su rol
+  useEffect(() => {
+    if (!currentUser || !StorageService.hasLoadedFromDrive()) return;
+    const ficha = profesores.find((p) => p.email.toLowerCase() === currentUser.email.toLowerCase());
+    if (!ficha) return;
+    const campos: (keyof Profesor)[] = ['tutor_de_grupo', 'tutoria_asignada_por', 'rol', 'nombre', 'apellidos', 'departamento'];
+    if (campos.some((c) => (ficha[c] || '') !== (currentUser[c] || ''))) {
+      const actualizado: Profesor = { ...currentUser };
+      campos.forEach((c) => { (actualizado as any)[c] = ficha[c]; });
+      AuthService.persistSession(actualizado, AuthService.isSharedSession());
+      setCurrentUser(actualizado);
+    }
+  }, [profesores]);
 
   useEffect(() => {
     refreshAllData();
@@ -576,6 +591,15 @@ export default function App() {
         )}
 
         {/* Historial Individual de Partes para el Profesorado Docente */}
+        {currentView === 'tutoria' && currentUser.tutor_de_grupo && (
+          <TutoriaView
+            currentUser={currentUser}
+            alumnos={alumnos}
+            sanciones={sanciones}
+            onPrintParte={(sancion) => setPrintableParte(sancion)}
+          />
+        )}
+
         {currentView === 'mis_partes' && (
           <MisPartesDocenteView
             sanciones={sanciones}

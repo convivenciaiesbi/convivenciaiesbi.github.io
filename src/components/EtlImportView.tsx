@@ -532,6 +532,7 @@ El Amrani Youssef,4º ESO D`;
       departamento: nuevoProfDpto.trim() || 'Claustro Docente',
       rol: nuevoProfRol,
       tutor_de_grupo: nuevoProfTutor || undefined,
+      tutoria_asignada_por: nuevoProfTutor ? 'JEFATURA' : undefined,
     }, currentUser.email);
 
     if (res.success) {
@@ -1153,7 +1154,12 @@ El Amrani Youssef,4º ESO D`;
                             )}
                             {prof.tutor_de_grupo && (
                               <div className="text-[10px] text-slate-500 mt-0.5 font-semibold">
-                                Tutor/a: {prof.tutor_de_grupo}
+                                Tutor/a: {LISTA_GRUPOS_OFICIALES.find(g => g.codigo === prof.tutor_de_grupo)?.etiqueta || prof.tutor_de_grupo}
+                                {prof.tutoria_asignada_por === 'DOCENTE' && (
+                                  <span className="ml-1 text-amber-700" title="El propio docente se ha asignado esta tutoría en su perfil. Revísela y cámbiela si no es correcta.">
+                                    (indicada por el docente)
+                                  </span>
+                                )}
                               </div>
                             )}
                           </td>

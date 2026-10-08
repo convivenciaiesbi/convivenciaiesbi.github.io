@@ -215,8 +215,8 @@ function esAdmin(p) {
 
 function perfilPublico(p) {
   return { id_profesor: p.id_profesor, email: p.email, nombre: p.nombre, apellidos: p.apellidos,
-           departamento: p.departamento, rol: p.rol, tutor_de_grupo: p.tutor_de_grupo, estado: p.estado,
-           motivo_baja: p.motivo_baja };
+           departamento: p.departamento, rol: p.rol, tutor_de_grupo: p.tutor_de_grupo,
+           tutoria_asignada_por: p.tutoria_asignada_por, estado: p.estado, motivo_baja: p.motivo_baja };
 }
 
 function propiedades() { return PropertiesService.getScriptProperties(); }
@@ -460,10 +460,20 @@ function esAutor(s, prof) {
 
 function vistaDocente(db, prof) {
   var d = sinCredenciales(db);
+  // Tutoría: el tutor ve completo todo lo de su grupo (partes, medidas y teléfonos de las familias)
+  var grupoTutoria = prof.tutor_de_grupo || '';
+  var deMiTutoria = {};
+  if (grupoTutoria) {
+    d.alumnos.forEach(function (a) { if (a && a.grupo === grupoTutoria) deMiTutoria[a.id_alumno] = true; });
+  }
   d.profesores = d.profesores.map(perfilPublico);
-  d.alumnos = d.alumnos.map(function (a) { var c = JSON.parse(JSON.stringify(a)); c.telefono_tutor = ''; c.nombre_tutor = ''; return c; });
+  d.alumnos = d.alumnos.map(function (a) {
+    var c = JSON.parse(JSON.stringify(a));
+    if (!deMiTutoria[a.id_alumno]) { c.telefono_tutor = ''; c.nombre_tutor = ''; }
+    return c;
+  });
   d.sanciones = d.sanciones.map(function (s) {
-    if (esAutor(s, prof)) return s;
+    if (esAutor(s, prof) || deMiTutoria[s.id_alumno]) return s;
     if (s.derivado_pac) {
       var c = JSON.parse(JSON.stringify(s));
       delete c.observaciones_tramitacion; delete c.fecha_comunicacion_familia;
@@ -474,6 +484,7 @@ function vistaDocente(db, prof) {
     return m;
   });
   d.compensaciones = d.compensaciones.map(function (c) {
+    if (deMiTutoria[c.id_alumno]) return c;
     return soloCampos(c, ['id_compensacion', 'timestamp', 'id_alumno', 'puntos_recuperados', 'fecha_completada']);
   });
   d.audit_logs = [];
@@ -506,9 +517,10 @@ function guardar(req) {
     var db = leerDb();
     var s = sesion(req.token, db);
     var entrada = asegurarListas(req.data || {});
-    var resultado = s.admin ? fusionAdmin(db, entrada) : fusionDocente(db, entrada, s);
+    var avisos = [];
+    var resultado = s.admin ? fusionAdmin(db, entrada) : fusionDocente(db, entrada, s, avisos);
     escribirDb(resultado);
-    return { ok: true, timestamp: resultado.timestamp };
+    return { ok: true, timestamp: resultado.timestamp, avisos: avisos };
   } finally {
     lock.releaseLock();
   }
@@ -562,9 +574,50 @@ function fusionAdmin(actual, entrada) {
 
 var CAMPOS_PAC = ['estado_pac', 'profesor_pac_receptor', 'hora_llegada_pac'];
 
+/**
+ * El docente puede cambiar en su perfil su nombre, apellidos, departamento y tutoría.
+ * La tutoría solo si el grupo no tiene ya otro tutor activo; queda anotado que la asignó él.
+ */
+function actualizarPerfilPropio(r, entrada, s, avisos) {
+  var propio = null;
+  (entrada.profesores || []).forEach(function (p) { if (p && norm(p.email) === s.email) propio = p; });
+  if (!propio) return;
+  var mio = null;
+  r.profesores.forEach(function (p) { if (p && norm(p.email) === s.email) mio = p; });
+  if (!mio) return;
+
+  ['nombre', 'apellidos', 'departamento'].forEach(function (c) {
+    if (typeof propio[c] === 'string' && propio[c].trim()) mio[c] = propio[c].trim();
+  });
+
+  var nueva = propio.tutor_de_grupo || '';
+  var anterior = mio.tutor_de_grupo || '';
+  if (nueva === anterior) return;
+  if (nueva) {
+    var ocupado = null;
+    r.profesores.forEach(function (p) {
+      if (p && norm(p.email) !== s.email && p.estado !== 'INACTIVO' && p.tutor_de_grupo === nueva) ocupado = p;
+    });
+    if (ocupado) {
+      avisos.push('El grupo ya tiene tutor/a (' + (ocupado.nombre || '') + ' ' + (ocupado.apellidos || '') + '). Pídaselo a Jefatura.');
+      return;
+    }
+    mio.tutor_de_grupo = nueva;
+    mio.tutoria_asignada_por = 'DOCENTE';
+  } else {
+    delete mio.tutor_de_grupo;
+    delete mio.tutoria_asignada_por;
+  }
+  r.audit_logs.unshift({ id_log: 'log-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1e6),
+    timestamp: new Date().toISOString(), usuario_email: s.email, accion: 'ACTUALIZACION_SISTEMA',
+    entidad: 'Docente/Tutoria', detalles: 'Tutoría cambiada por el propio docente: ' + (anterior || 'ninguna') + ' -> ' + (nueva || 'ninguna'),
+    hash_integridad: '' });
+}
+
 /** Profesorado sin privilegios: solo sus partes, el estado del Aula PAC y su propio registro de auditoría. */
-function fusionDocente(actual, entrada, s) {
+function fusionDocente(actual, entrada, s, avisos) {
   var r = actual;
+  actualizarPerfilPropio(r, entrada, s, avisos || []);
   var porId = {};
   r.sanciones.forEach(function (x, i) { if (x && x.id_sancion) porId[x.id_sancion] = i; });
   var yaBorradas = {};
