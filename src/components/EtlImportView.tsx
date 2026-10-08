@@ -46,6 +46,7 @@ import {
   AlumnoImportRow,
   ProfesorImportRow 
 } from '../services/odsImportService';
+import { CUENTA_DRIVE, CARPETA_DRIVE_ID, ARCHIVO_DB_DRIVE, PREFIJO_BACKUP, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
 
 interface EtlImportViewProps {
   currentUser: Profesor;
@@ -377,7 +378,7 @@ El Amrani Youssef,4º ESO D`;
         const id = StorageService.crearSnapshotBackup(currentUser.email);
         const payload = GoogleDriveSyncService.getFullDatabasePayload();
         const jsonStr = JSON.stringify(payload, null, 2);
-        const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_SNAPSHOT_${new Date().toISOString().split('T')[0]}.json`;
+        const filename = `${PREFIJO_BACKUP}_SNAPSHOT_${new Date().toISOString().split('T')[0]}.json`;
 
         // Descarga de archivo automática
         const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
@@ -851,7 +852,7 @@ El Amrani Youssef,4º ESO D`;
               </span>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              Persistencia institucional en Google Drive corporativo (<strong className="font-mono text-slate-700">14007180.aplicaciones@g.educaand.es</strong> · Almacenamiento Oficial del Centro). Cumplimiento estricto RGPD/LOPDGDD.
+              Persistencia institucional en Google Drive corporativo (<strong className="font-mono text-slate-700">{CUENTA_DRIVE}</strong> · Almacenamiento Oficial del Centro). Cumplimiento estricto RGPD/LOPDGDD.
             </p>
           </div>
 
@@ -894,11 +895,11 @@ El Amrani Youssef,4º ESO D`;
               </span>
               <span className="w-2 h-2 rounded-full bg-sky-500" />
             </div>
-            <div className="font-mono text-xs font-bold text-slate-900 truncate" title="00_SIGC_BD_CENTRO_BLAS_INFANTE.json">
-              00_SIGC_BD_CENTRO_BLAS_INFANTE.json
+            <div className="font-mono text-xs font-bold text-slate-900 truncate" title={ARCHIVO_DB_DRIVE}>
+              {ARCHIVO_DB_DRIVE}
             </div>
             <div className="text-[10px] text-slate-500 font-mono">
-              Unidad Compartida: 14007180.aplicaciones@g.educaand.es
+              Unidad Compartida: {CUENTA_DRIVE}
             </div>
           </div>
 

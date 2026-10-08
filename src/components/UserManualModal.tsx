@@ -21,6 +21,7 @@ import {
   Sparkles,
   ArrowRight
 } from 'lucide-react';
+import { CUENTA_DRIVE, CARPETA_DRIVE_ID } from '../config/entorno';
 
 interface UserManualModalProps {
   isOpen: boolean;
@@ -366,8 +367,8 @@ export const UserManualModal: React.FC<UserManualModalProps> = ({
                     La aplicación garantiza la custodia institucional permanente dentro del ecosistema de la Junta de Andalucía:
                   </p>
                   <ul className="list-disc pl-5 space-y-1">
-                    <li><strong>Cuenta Institucional:</strong> <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-900 font-bold">14007180.aplicaciones@g.educaand.es</code>.</li>
-                    <li><strong>Carpeta Oficial Vinculada:</strong> <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-900 font-bold">1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP</code>.</li>
+                    <li><strong>Cuenta Institucional:</strong> <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-900 font-bold">{CUENTA_DRIVE}</code>.</li>
+                    <li><strong>Carpeta Oficial Vinculada:</strong> <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-900 font-bold">{CARPETA_DRIVE_ID}</code>.</li>
                     <li><strong>Tests de Seguridad RGPD:</strong> En la barra superior, pulsa <strong>«Tests RGPD»</strong> para auditar en tiempo real los 12 controles de ciberseguridad, inmutabilidad y protección de datos, y exportar el informe para inspección.</li>
                   </ul>
                 </div>

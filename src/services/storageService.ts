@@ -6,6 +6,7 @@
 import { Alumno, Profesor, Sancion, Compensacion, AuditLog, DriveSyncStatus, GrupoEducativo, UnidadInstitucionalConfig, MovimientoPuntos, CursoAcademicoArchivo, InfoCursoAcademico, RoleUsuario } from '../types/convivencia';
 import { ALUMNOS_INICIALES, PROFESORES_INICIALES, SANCIONES_INICIALES, COMPENSACIONES_INICIALES, AUDIT_LOGS_INICIALES, MOVIMIENTOS_INICIALES } from '../data/seedData';
 import { ProfesorImportRow, parsearTextoOcsvProfesores } from './odsImportService';
+import { ES_ENTORNO_PRUEBAS, CUENTA_DRIVE, CARPETA_DRIVE_ID, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
 
 const KEY_ALUMNOS = 'sigc_bi_alumnos_v3';
 const KEY_PROFESORES = 'sigc_bi_profesores_v2';
@@ -79,6 +80,18 @@ export const UNIDAD_INSTITUCIONAL_OFICIAL: UnidadInstitucionalConfig = {
   folderId: '1S5zjeSgcfVkL-eoQLsJ9I_ltHAnRrbaS',
 };
 
+// Unidad mostrada en el entorno de pruebas (ver src/config/entorno.ts)
+const UNIDAD_PRUEBAS: UnidadInstitucionalConfig = {
+  email: CUENTA_DRIVE,
+  nombreUnidad: NOMBRE_UNIDAD_DRIVE,
+  esModoPruebas: true,
+  centroEducativo: 'IES Blas Infante (Córdoba) · PRUEBAS',
+  codigoCentro: '14007180',
+  fechaConfiguracion: '2026-10-08',
+  observaciones: 'Entorno de pruebas con alumnado ficticio. No contiene datos reales del centro.',
+  folderId: CARPETA_DRIVE_ID,
+};
+
 /**
  * Normaliza nombres y apellidos de alumnos para comparaciones a prueba de duplicados:
  * - Elimina acentos/tildes y diacríticos (á -> a, ü -> u, etc.)
@@ -110,6 +123,11 @@ export function normalizarTokensNombre(nombre?: string, apellidos?: string): str
 
 export class StorageService {
   static getUnidadInstitucional(): UnidadInstitucionalConfig {
+    // En el entorno de pruebas se muestra siempre la unidad de pruebas,
+    // ignorando lo que hubiera guardado el navegador.
+    if (ES_ENTORNO_PRUEBAS) {
+      return UNIDAD_PRUEBAS;
+    }
     const raw = localStorage.getItem(KEY_UNIDAD_INSTITUCIONAL);
     if (!raw) {
       this.saveUnidadInstitucional(UNIDAD_INSTITUCIONAL_OFICIAL);
@@ -134,6 +152,7 @@ export class StorageService {
   }
 
   static saveUnidadInstitucional(config: UnidadInstitucionalConfig): void {
+    if (ES_ENTORNO_PRUEBAS) return; // En pruebas la unidad no se puede cambiar
     localStorage.setItem(KEY_UNIDAD_INSTITUCIONAL, JSON.stringify(config));
   }
 

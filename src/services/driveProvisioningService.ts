@@ -1,11 +1,13 @@
 /**
  * Servicio para generar y exportar la estructura de carpetas oficial
- * en Google Drive corporativo para 14007180.aplicaciones@g.educaand.es
+ * en Google Drive (cuenta y carpeta definidas en src/config/entorno.ts)
  * Con todos los grupos del IES Blas Infante:
  * - Ciclos: 1º y 2º FRÍO, 1º y 2º INF, 1º y 2º CALOR
  * - ESO: 1º a 4º ESO (Líneas A, B, C, D)
  * - Bachillerato: 1º y 2º BACH (Líneas A, B, C, D)
  */
+
+import { CUENTA_DRIVE, CARPETA_DRIVE_ID, NOMBRE_CARPETA_DRIVE, ARCHIVO_DB_DRIVE, ES_ENTORNO_PRUEBAS } from '../config/entorno';
 
 export interface FolderNode {
   name: string;
@@ -14,7 +16,7 @@ export interface FolderNode {
 }
 
 export const ESTRUCTURA_DRIVE_OFICIAL: FolderNode = {
-  name: 'CONVIVENCIA_IES_BLAS_INFANTE',
+  name: NOMBRE_CARPETA_DRIVE,
   description: 'Carpeta raíz oficial de custodia de convivencia escolar (Google Workspace for Education)',
   subfolders: [
     {
@@ -97,16 +99,22 @@ export const ESTRUCTURA_DRIVE_OFICIAL: FolderNode = {
  * Busca tu carpeta existente CONVIVENCIA_IES_BLAS_INFANTE (o por su ID de carpeta) y crea todas las subcarpetas dentro de ella.
  */
 export function generarGoogleAppsScriptCreacion(
-  cuentaDestino: string = '14007180.aplicaciones@g.educaand.es',
+  cuentaDestino: string = CUENTA_DRIVE,
   idCarpetaDrive?: string
 ): string {
+  // En el entorno de pruebas los scripts SIEMPRE apuntan a la carpeta de pruebas,
+  // aunque la pantalla pase otros datos, para no tocar nunca el Drive real.
+  if (ES_ENTORNO_PRUEBAS) {
+    cuentaDestino = CUENTA_DRIVE;
+    idCarpetaDrive = CARPETA_DRIVE_ID;
+  }
   const folderIdString = (idCarpetaDrive && idCarpetaDrive.trim().length > 0) ? idCarpetaDrive.trim() : '';
 
   return `/**
  * =========================================================================
  * SCRIPT OFICIAL DE CREACIÓN DE ESTRUCTURA GOOGLE DRIVE
  * Centro: IES Blas Infante (Córdoba) - Código: 14007180
- * Carpeta Padre: CONVIVENCIA_IES_BLAS_INFANTE ${folderIdString ? `(ID: ${folderIdString})` : ''}
+ * Carpeta Padre: ${NOMBRE_CARPETA_DRIVE} ${folderIdString ? `(ID: ${folderIdString})` : ''}
  * Cuenta Propietaria: ${cuentaDestino}
  * Entorno: Google Workspace for Education (Junta de Andalucía)
  * =========================================================================
@@ -115,12 +123,12 @@ export function generarGoogleAppsScriptCreacion(
  * 1. Inicia sesión en Google con la cuenta del centro: ${cuentaDestino}
  * 2. Abre https://script.google.com y crea un "Nuevo proyecto".
  * 3. Pega este contenido íntegro y pulsa "Ejecutar".
- * 4. ¡Listo! Creará dentro de tu carpeta "CONVIVENCIA_IES_BLAS_INFANTE" todas las
+ * 4. ¡Listo! Creará dentro de tu carpeta "${NOMBRE_CARPETA_DRIVE}" todas las
  *    subcarpetas por grupos (Ciclos, ESO, Bachillerato), PAC, Backups y Plantillas.
  */
 
 var ID_CARPETA_PADRE = '${folderIdString}';
-var NOMBRE_CARPETA_PADRE = 'CONVIVENCIA_IES_BLAS_INFANTE';
+var NOMBRE_CARPETA_PADRE = '${NOMBRE_CARPETA_DRIVE}';
 
 function crearEstructuraConvivenciaBlasInfante() {
   Logger.log('Iniciando aprovisionamiento de carpetas dentro de ' + NOMBRE_CARPETA_PADRE + '...');
@@ -189,7 +197,7 @@ function crearEstructuraConvivenciaBlasInfante() {
       readmeName,
       'SISTEMA INTEGRAL DE GESTIÓN DE LA CONVIVENCIA ESCOLAR (SIGC)\\n' +
       'Centro: IES Blas Infante (Córdoba) - Código: 14007180\\n' +
-      'Carpeta Raíz: CONVIVENCIA_IES_BLAS_INFANTE\\n' +
+      'Carpeta Raíz: ${NOMBRE_CARPETA_DRIVE}\\n' +
       'Cuenta Corporativa Oficial: ${cuentaDestino}\\n\\n' +
       'Esta estructura de directorios ha sido aprovisionada automáticamente para:\\n' +
       '1. Custodia de partes de convivencia por grupos en PDF (01_Partes_PDF):\\n' +
@@ -223,13 +231,19 @@ function getOrCreateSubFolder(parentFolder, folderName) {
 
 /**
  * Genera el script de Backend en Google Apps Script para implementar una API REST
- * conectada directamente con Google Drive (14007180.aplicaciones@g.educaand.es).
+ * conectada directamente con Google Drive (cuenta definida en src/config/entorno.ts).
  * Permite sincronización bidireccional inmediata en todos los dispositivos sin servidores intermedios.
  */
 export function generarGoogleAppsScriptDatabaseBackend(
-  cuentaDestino: string = '14007180.aplicaciones@g.educaand.es',
+  cuentaDestino: string = CUENTA_DRIVE,
   idCarpetaDrive?: string
 ): string {
+  // En el entorno de pruebas los scripts SIEMPRE apuntan a la carpeta de pruebas,
+  // aunque la pantalla pase otros datos, para no tocar nunca el Drive real.
+  if (ES_ENTORNO_PRUEBAS) {
+    cuentaDestino = CUENTA_DRIVE;
+    idCarpetaDrive = CARPETA_DRIVE_ID;
+  }
   const folderIdString = (idCarpetaDrive && idCarpetaDrive.trim().length > 0) ? idCarpetaDrive.trim() : '';
 
   return `/**
@@ -237,7 +251,7 @@ export function generarGoogleAppsScriptDatabaseBackend(
  * API REST DE CUSTODIA Y SINCRONIZACIÓN EN GOOGLE DRIVE
  * Centro: IES Blas Infante (Córdoba - 14007180)
  * Cuenta Propietaria: ${cuentaDestino}
- * Carpeta Destino: CONVIVENCIA_IES_BLAS_INFANTE ${folderIdString ? `(ID: ${folderIdString})` : ''}
+ * Carpeta Destino: ${NOMBRE_CARPETA_DRIVE} ${folderIdString ? `(ID: ${folderIdString})` : ''}
  * =========================================================================
  * 
  * INSTRUCCIONES DE DESPLIEGUE EN 1 MINUTO:
@@ -252,7 +266,7 @@ export function generarGoogleAppsScriptDatabaseBackend(
  */
 
 var ID_CARPETA_DRIVE = '${folderIdString}';
-var NOMBRE_ARCHIVO_DB = '00_SIGC_BD_CENTRO_BLAS_INFANTE.json';
+var NOMBRE_ARCHIVO_DB = '${ARCHIVO_DB_DRIVE}';
 
 /**
  * Función de prueba directa que puedes ejecutar pulsando "Ejecutar" en el editor de Apps Script
@@ -572,15 +586,13 @@ function guardarBaseDatosEnDrive(incomingData) {
 }
 
 function obtenerCarpetaDestino() {
+  // Si hay una carpeta configurada se usa SOLO esa: si no se puede abrir, se produce
+  // un error en vez de buscar otra carpeta con un nombre parecido y escribir en ella.
   if (ID_CARPETA_DRIVE && ID_CARPETA_DRIVE.length > 5) {
-    try {
-      return DriveApp.getFolderById(ID_CARPETA_DRIVE);
-    } catch (e) {
-      Logger.log('No se pudo acceder por ID, buscando por nombre...');
-    }
+    return DriveApp.getFolderById(ID_CARPETA_DRIVE);
   }
 
-  var folders = DriveApp.getFoldersByName('CONVIVENCIA_IES_BLAS_INFANTE');
+  var folders = DriveApp.getFoldersByName('${NOMBRE_CARPETA_DRIVE}');
   if (folders.hasNext()) {
     return folders.next();
   }

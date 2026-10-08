@@ -35,6 +35,7 @@ import { AuthService } from '../services/authService';
 import { GoogleDriveSyncService } from '../services/googleDriveSyncService';
 import { ESTRUCTURA_DRIVE_OFICIAL, generarGoogleAppsScriptCreacion, generarGoogleAppsScriptDatabaseBackend } from '../services/driveProvisioningService';
 import iesLogo from '../assets/images/logo_rectangular_iesbi.png';
+import { CUENTA_DRIVE, CARPETA_DRIVE_ID, ARCHIVO_DB_DRIVE, PREFIJO_BACKUP, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
 
 interface DriveAuditModalProps {
   onClose: () => void;
@@ -64,7 +65,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
   const [tempEmail, setTempEmail] = useState(unidadConfig.email);
   const [tempEsPruebas, setTempEsPruebas] = useState(unidadConfig.esModoPruebas);
   const [tempObservaciones, setTempObservaciones] = useState(unidadConfig.observaciones);
-  const [tempFolderId, setTempFolderId] = useState(unidadConfig.folderId || '1S5zjeSgcfVkL-eoQLsJ9I_ltHAnRrbaS');
+  const [tempFolderId, setTempFolderId] = useState(unidadConfig.folderId || CARPETA_DRIVE_ID);
   const [copiedScript, setCopiedScript] = useState(false);
   const [showScriptViewer, setShowScriptViewer] = useState(false);
 
@@ -93,7 +94,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
   const [isSavingApiUrl, setIsSavingApiUrl] = useState(false);
 
   const handleCopyBackendScript = () => {
-    const code = generarGoogleAppsScriptDatabaseBackend(unidadConfig.email, unidadConfig.folderId || '1S5zjeSgcfVkL-eoQLsJ9I_ltHAnRrbaS');
+    const code = generarGoogleAppsScriptDatabaseBackend(unidadConfig.email, unidadConfig.folderId || CARPETA_DRIVE_ID);
     navigator.clipboard.writeText(code);
     setCopiedBackendScript(true);
     setTimeout(() => setCopiedBackendScript(false), 3000);
@@ -114,7 +115,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
       const pushRes = await GoogleDriveSyncService.pushToGoogleDrive();
       setIsSimulatingSync(false);
       if (pullRes.success || pushRes.success) {
-        setSyncFeedback(`✅ ¡Base de datos sincronizada! Archivo '00_SIGC_BD_CENTRO_BLAS_INFANTE.json' actualizado (${StorageService.getAlumnos().length} alumnos, ${StorageService.getSanciones().length} partes).`);
+        setSyncFeedback(`✅ ¡Base de datos sincronizada! Archivo '${ARCHIVO_DB_DRIVE}' actualizado (${StorageService.getAlumnos().length} alumnos, ${StorageService.getSanciones().length} partes).`);
       } else {
         setSyncFeedback(`⚠️ ${pushRes.message}`);
       }
@@ -126,13 +127,13 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
 
   const handlePullOnlyFromDrive = async () => {
     setIsSimulatingSync(true);
-    setSyncFeedback('Descargando datos desde 00_SIGC_BD_CENTRO_BLAS_INFANTE.json en Google Drive...');
+    setSyncFeedback(`Descargando datos desde ${ARCHIVO_DB_DRIVE} en Google Drive...`);
     try {
       StorageService.saveDeletedSancionIds([]);
       const pullRes = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
       setIsSimulatingSync(false);
       if (pullRes.success) {
-        setSyncFeedback(`✅ ¡Datos recuperados desde '00_SIGC_BD_CENTRO_BLAS_INFANTE.json'! (${pullRes.dataCount?.alumnos ?? 0} alumnos, ${pullRes.dataCount?.sanciones ?? 0} partes cargados). Recargando...`);
+        setSyncFeedback(`✅ ¡Datos recuperados desde '${ARCHIVO_DB_DRIVE}'! (${pullRes.dataCount?.alumnos ?? 0} alumnos, ${pullRes.dataCount?.sanciones ?? 0} partes cargados). Recargando...`);
         setTimeout(() => {
           window.location.reload();
         }, 900);
@@ -259,10 +260,10 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
           <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-slate-700">
             <span>Carpeta vinculada en Google Drive:</span>
             <code className="font-mono bg-white px-2 py-0.5 rounded border border-emerald-300 text-emerald-950 font-bold">
-              {unidadConfig.folderId || '1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP'}
+              {unidadConfig.folderId || CARPETA_DRIVE_ID}
             </code>
             <a
-              href={`https://drive.google.com/drive/folders/${unidadConfig.folderId || '1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP'}`}
+              href={`https://drive.google.com/drive/folders/${unidadConfig.folderId || CARPETA_DRIVE_ID}`}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-sky-700 hover:text-sky-900 underline font-semibold cursor-pointer"
@@ -282,7 +283,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                   type="email"
                   value={tempEmail}
                   onChange={(e) => setTempEmail(e.target.value)}
-                  placeholder="ej. 14007180.aplicaciones@g.educaand.es"
+                  placeholder={`ej. ${CUENTA_DRIVE}`}
                   required
                   pattern=".+@g\.educaand\.es"
                   title="Debe pertenecer al dominio @g.educaand.es"
@@ -298,7 +299,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                   type="text"
                   value={tempFolderId}
                   onChange={(e) => setTempFolderId(e.target.value)}
-                  placeholder="ej. 1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP"
+                  placeholder={`ej. ${CARPETA_DRIVE_ID}`}
                   required
                   className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 font-mono font-semibold focus:border-sky-600 focus:outline-none"
                 />
@@ -365,7 +366,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
               </span>
             </div>
             <div className="space-y-1 font-mono text-[11px] text-slate-600">
-              <div>Archivo: <strong className="text-slate-900">00_SIGC_BD_CENTRO_BLAS_INFANTE.json</strong></div>
+              <div>Archivo: <strong className="text-slate-900">{ARCHIVO_DB_DRIVE}</strong></div>
               <div>Unidad activa: {unidadConfig.email}</div>
               <div>Alumnos registrados: {alumnos.length}</div>
               <div>Partes almacenados: {sanciones.length}</div>
@@ -379,7 +380,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                 className="w-full inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-[11px] font-semibold transition-colors cursor-pointer shadow-2xs"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>Recuperar Partes desde 00_SIGC_BD_CENTRO_BLAS_INFANTE.json</span>
+                <span>Recuperar Partes desde {ARCHIVO_DB_DRIVE}</span>
               </button>
             </div>
           </div>
@@ -510,7 +511,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-600 leading-relaxed">
-            Permite sincronización bidireccional instantánea entre todos los dispositivos (ordenadores de aula, guardias, jefatura) conectándose directamente con la carpeta <code className="font-mono bg-sky-50 text-sky-900 px-1 py-0.5 rounded border border-sky-200">{unidadConfig.folderId || '1S5zjeSgcfVkL-eoQLsJ9I_ltHAnRrbaS'}</code> de Drive.
+            Permite sincronización bidireccional instantánea entre todos los dispositivos (ordenadores de aula, guardias, jefatura) conectándose directamente con la carpeta <code className="font-mono bg-sky-50 text-sky-900 px-1 py-0.5 rounded border border-sky-200">{unidadConfig.folderId || CARPETA_DRIVE_ID}</code> de Drive.
           </p>
 
           <form onSubmit={handleSaveApiUrl} className="flex flex-wrap items-center gap-2 pt-1">
@@ -532,14 +533,14 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
               disabled={isSimulatingSync}
               onClick={async () => {
                 setIsSimulatingSync(true);
-                setSyncFeedback('Descargando 00_SIGC_BD_CENTRO_BLAS_INFANTE.json desde Google Drive...');
+                setSyncFeedback(`Descargando ${ARCHIVO_DB_DRIVE} desde Google Drive...`);
                 try {
                   StorageService.saveDeletedSancionIds([]);
                   const res = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
                   setIsSimulatingSync(false);
                   if (res.success) {
                     window.dispatchEvent(new Event('focus'));
-                    setSyncFeedback(`✅ ¡Archivo 00_SIGC_BD_CENTRO_BLAS_INFANTE.json leído y sincronizado! (${res.dataCount?.alumnos ?? 0} alumnos, ${res.dataCount?.sanciones ?? 0} partes recuperados)`);
+                    setSyncFeedback(`✅ ¡Archivo ${ARCHIVO_DB_DRIVE} leído y sincronizado! (${res.dataCount?.alumnos ?? 0} alumnos, ${res.dataCount?.sanciones ?? 0} partes recuperados)`);
                   } else {
                     setSyncFeedback(`⚠️ Aviso de conexión: ${res.message}`);
                   }
@@ -581,7 +582,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
               </h3>
             </div>
             <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">
-              00_SIGC_BD_CENTRO_BLAS_INFANTE.json
+              {ARCHIVO_DB_DRIVE}
             </span>
           </div>
 
@@ -596,7 +597,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                 try {
                   const payload = GoogleDriveSyncService.getFullDatabasePayload();
                   const jsonStr = JSON.stringify(payload, null, 2);
-                  const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_${new Date().toISOString().split('T')[0]}.json`;
+                  const filename = `${PREFIJO_BACKUP}_${new Date().toISOString().split('T')[0]}.json`;
 
                   // Método 1: Blob y enlace a
                   const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
@@ -624,7 +625,7 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
                   try {
                     const payload = GoogleDriveSyncService.getFullDatabasePayload();
                     const jsonStr = JSON.stringify(payload, null, 2);
-                    const filename = `00_SIGC_BD_CENTRO_BLAS_INFANTE_${new Date().toISOString().split('T')[0]}.json`;
+                    const filename = `${PREFIJO_BACKUP}_${new Date().toISOString().split('T')[0]}.json`;
                     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(jsonStr);
                     const link = document.createElement('a');
                     link.setAttribute('href', dataUri);

@@ -20,6 +20,7 @@ import {
   X
 } from 'lucide-react';
 import { SecurityTestRunner, SecurityTestReport } from '../services/securityTestRunner';
+import { CUENTA_DRIVE } from '../config/entorno';
 
 interface SecurityAuditModalProps {
   isOpen: boolean;
@@ -153,8 +154,8 @@ ${report.results.map(r => `[${r.passed ? 'PASS' : 'FAIL'}] ${r.id} (${r.severity
 
           <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Custodia Oficial Drive</span>
-            <div className="mt-1 font-mono text-[11px] font-semibold text-slate-700 truncate" title="14007180.aplicaciones@g.educaand.es">
-              14007180.aplicaciones
+            <div className="mt-1 font-mono text-[11px] font-semibold text-slate-700 truncate" title={CUENTA_DRIVE}>
+              {CUENTA_DRIVE.split('@')[0]}
             </div>
           </div>
 

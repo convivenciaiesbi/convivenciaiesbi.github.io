@@ -6,7 +6,7 @@
 import { Alumno, Profesor, Sancion, Compensacion, AuditLog } from '../types/convivencia';
 import { StorageService } from './storageService';
 import { AuthService } from './authService';
-import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS } from '../config/entorno';
+import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/entorno';
 
 const SYNC_URL_STORAGE_KEY = 'sigc_bi_drive_sync_api_url_v1';
 const LAST_SYNC_STORAGE_KEY = 'sigc_bi_last_drive_sync_timestamp_v1';
@@ -126,7 +126,7 @@ export class GoogleDriveSyncService {
         nombre: 'IES Blas Infante',
         codigo: '14007180',
         cuenta_institucional: unidad.email,
-        drive_folder_id: unidad.folderId || '1UJBQCWfs9G9mu3N3F1wDjL_UJ__YhdTP',
+        drive_folder_id: unidad.folderId || CARPETA_DRIVE_ID,
       },
       profesores: profs,
       credenciales_profesores: creds,

@@ -76,6 +76,7 @@ import {
   Clock
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
+import { CUENTA_DRIVE } from './config/entorno';
 
 export default function App() {
   // Authentication session (null means show LoginView)
@@ -708,7 +709,7 @@ export default function App() {
           <div className="flex items-center gap-4 text-[11px]">
             <span>Decreto 327/2010</span>
             <span>·</span>
-            <span>Almacenamiento Centro: <strong className="font-mono text-sky-950">14007180.aplicaciones@g.educaand.es</strong></span>
+            <span>Almacenamiento Centro: <strong className="font-mono text-sky-950">{CUENTA_DRIVE}</strong></span>
             <span>·</span>
             <span className="text-sky-700 font-medium">Google Workspace for Education</span>
           </div>
