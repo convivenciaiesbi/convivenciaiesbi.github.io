@@ -483,6 +483,10 @@ function vistaDocente(db, prof) {
 function leer(req) {
   var db = leerDb();
   var s = sesion(req.token, db);
+  // Lectura incremental: si el cliente ya tiene esta versión, no se reenvía nada
+  if (req.desde && db.timestamp && req.desde === db.timestamp) {
+    return { ok: true, sinCambios: true, timestamp: db.timestamp };
+  }
   return { ok: true, admin: s.admin, usuario: perfilPublico(s.prof), data: s.admin ? sinCredenciales(db) : vistaDocente(db, s.prof) };
 }
 

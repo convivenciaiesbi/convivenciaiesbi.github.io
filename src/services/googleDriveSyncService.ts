@@ -8,6 +8,7 @@ import { StorageService } from './storageService';
 import { AuthService } from './authService';
 import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/entorno';
 import { llamarApi } from './apiService';
+import { guardarCola, restaurarCola } from './colaPendiente';
 
 const SYNC_URL_STORAGE_KEY = 'sigc_bi_drive_sync_api_url_v1';
 const LAST_SYNC_STORAGE_KEY = 'sigc_bi_last_drive_sync_timestamp_v1';
@@ -53,6 +54,8 @@ export class GoogleDriveSyncService {
    * Agrupa múltiples acciones rápidas de profesores en un único envío eficiente.
    */
   static triggerFastSync(delayMs: number = 350): void {
+    // Guardar en el navegador lo que aún no ha confirmado el servidor (por si se cierra la pestaña)
+    guardarCola(AuthService.getCurrentUser()?.email);
     if (this.pushTimeoutId) {
       clearTimeout(this.pushTimeoutId);
     }
@@ -164,9 +167,26 @@ export class GoogleDriveSyncService {
     }
 
     try {
-      const respuesta = await llamarApi('leer', { token });
+      const primeraCarga = !StorageService.hasLoadedFromDrive();
+      // Si ya tenemos los datos, pedir solo "¿ha cambiado algo desde esta versión?"
+      const desde = StorageService.hasLoadedFromDrive() ? this.lastRemoteTimestamp : null;
+      const respuesta = await llamarApi('leer', desde ? { token, desde } : { token });
       if (!respuesta.ok) {
         throw new Error(respuesta.error || 'El servidor de datos no ha respondido correctamente.');
+      }
+      if (respuesta.sinCambios) {
+        // Nada nuevo en Drive: solo actualizar saldos (la recuperación semanal depende de la fecha)
+        StorageService.recalcularPuntosAlumnos();
+        return {
+          success: true,
+          notModified: true,
+          message: 'Base de datos al día (sin cambios).',
+          dataCount: {
+            profesores: StorageService.getProfesores().length,
+            alumnos: StorageService.getAlumnos().length,
+            sanciones: StorageService.getSanciones().length,
+          },
+        };
       }
       const remoteData: any = respuesta.data;
       if (!remoteData || typeof remoteData !== 'object') {
@@ -333,10 +353,13 @@ export class GoogleDriveSyncService {
         remoteData.audit_logs.forEach((l: AuditLog) => {
           if (l?.id_log) logMap.set(l.id_log, l);
         });
+        // El servidor no envía la auditoría al profesorado sin privilegios: en esas cuentas
+        // que falten registros no significa que haya algo pendiente (evita envíos continuos)
+        const usuarioEsAdmin = AuthService.isAdmin(AuthService.getCurrentUser());
         localLogs.forEach(ll => {
           if (ll?.id_log && !logMap.has(ll.id_log)) {
             logMap.set(ll.id_log, ll);
-            localHasPendingData = true;
+            if (usuarioEsAdmin) localHasPendingData = true;
           }
         });
         const mergedLogs = Array.from(logMap.values())
@@ -346,6 +369,12 @@ export class GoogleDriveSyncService {
       }
 
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
+
+      // Recuperar (una vez por sesión) los cambios que quedaron sin subir en este navegador
+      const usuario = AuthService.getCurrentUser();
+      if (usuario && primeraCarga) {
+        if (restaurarCola(usuario.email) > 0) localHasPendingData = true;
+      }
 
       // Si teníamos datos locales pendientes que el servidor no tenía, sincronizar de vuelta
       if (localHasPendingData && !options?.skipAutoPush) {
@@ -410,11 +439,14 @@ export class GoogleDriveSyncService {
     // mientras tanto siguen pendientes para el siguiente.
     const sentSancionIds = StorageService.getPendingSyncSancionIds();
     const sentAlumnoIds = StorageService.getPendingSyncAlumnoIds();
+    const sentCompIds = StorageService.getPendingSyncCompensacionIds();
     const markSent = () => {
       this.pushEpoch++;
       StorageService.clearPendingSyncSancionIds(sentSancionIds.length ? sentSancionIds : ['__ninguno__']);
       StorageService.clearPendingSyncProfesorEmails();
       StorageService.clearPendingSyncAlumnoIds(sentAlumnoIds);
+      StorageService.clearPendingSyncCompensacionIds(sentCompIds);
+      guardarCola(AuthService.getCurrentUser()?.email);
     };
 
     const token = AuthService.getToken();
@@ -434,6 +466,7 @@ export class GoogleDriveSyncService {
     }
 
     this.lastPushError = respuesta.error || 'Error desconocido al guardar.';
+    guardarCola(AuthService.getCurrentUser()?.email);
     this.finishPush();
     // Reintentar más tarde: los cambios siguen marcados como pendientes
     if (respuesta.codigo !== 'NO_AUTH') {

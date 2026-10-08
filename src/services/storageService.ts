@@ -67,6 +67,7 @@ let memoryDeletedProfesores: string[] = [];
 let memoryPendingSyncSanciones: string[] = [];
 let memoryPendingSyncProfesores: string[] = [];
 let memoryPendingSyncAlumnos: string[] = [];
+let memoryPendingSyncCompensaciones: string[] = [];
 let memoryLastWriteTimestamp: string | null = null;
 let memoryHasLoadedFromDrive: boolean = false;
 
@@ -178,6 +179,7 @@ export class StorageService {
     memoryPendingSyncSanciones = [];
     memoryPendingSyncProfesores = [];
     memoryPendingSyncAlumnos = [];
+    memoryPendingSyncCompensaciones = [];
     memoryHasLoadedFromDrive = false;
   }
 
@@ -1219,6 +1221,19 @@ export class StorageService {
     memoryPendingSyncProfesores = [];
   }
 
+  static getPendingSyncCompensacionIds(): string[] {
+    return [...memoryPendingSyncCompensaciones];
+  }
+
+  static addPendingSyncCompensacionId(id: string): void {
+    if (id && !memoryPendingSyncCompensaciones.includes(id)) memoryPendingSyncCompensaciones.push(id);
+  }
+
+  static clearPendingSyncCompensacionIds(ids: string[]): void {
+    const quitar = new Set(ids);
+    memoryPendingSyncCompensaciones = memoryPendingSyncCompensaciones.filter(id => !quitar.has(id));
+  }
+
   static getPendingSyncAlumnoIds(): string[] {
     return [...memoryPendingSyncAlumnos];
   }
@@ -1864,6 +1879,7 @@ export class StorageService {
       fecha_completada: hoyLocal(),
     };
     this.saveCompensaciones([...this.getCompensaciones(), compensacion]);
+    this.addPendingSyncCompensacionId(compensacion.id_compensacion);
 
     const alumnosActualizados = this.recalcularPuntosAlumnos(idAlumno);
     const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === idAlumno) || alumno;

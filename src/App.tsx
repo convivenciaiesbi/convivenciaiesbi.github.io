@@ -77,6 +77,7 @@ import {
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
 import { EVENTO_SESION_CADUCADA } from './services/apiService';
+import { guardarCola, hayCambiosSinSubir, contarCambiosSinSubir } from './services/colaPendiente';
 import { CUENTA_DRIVE } from './config/entorno';
 
 export default function App() {
@@ -90,6 +91,27 @@ export default function App() {
     }
     return user;
   });
+
+  // Número de cambios aún no confirmados por el servidor (se muestra en la cabecera)
+  const [cambiosSinSubir, setCambiosSinSubir] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setCambiosSinSubir(contarCambiosSinSubir()), 1500);
+    return () => clearInterval(id);
+  }, []);
+
+  // Antes de cerrar la pestaña: guardar en el navegador lo que no se ha subido y avisar
+  useEffect(() => {
+    const alCerrar = (e: BeforeUnloadEvent) => {
+      const email = AuthService.getCurrentUser()?.email;
+      guardarCola(email);
+      if (email && hayCambiosSinSubir()) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', alCerrar);
+    return () => window.removeEventListener('beforeunload', alCerrar);
+  }, []);
 
   // Si el servidor indica que la sesión ya no es válida, volver a la pantalla de acceso
   useEffect(() => {
@@ -209,8 +231,9 @@ export default function App() {
 
     syncFromDrive(true);
 
-    // 2. Sincronización automática periódica de alta frecuencia (cada 3 segundos) para tiempo real absoluto entre dispositivos
-    const intervalId = setInterval(() => syncFromDrive(true), 3000);
+    // 2. Comprobación periódica de cambios (cada 10 segundos). Si no hay novedades, el servidor
+    //    responde solo "sin cambios", sin reenviar la base de datos.
+    const intervalId = setInterval(() => syncFromDrive(true), 10000);
 
     // 3. Sincronización inmediata cuando la pestaña recupera el foco, cambia la visibilidad o vuelve la conexión
     const handleQuickSync = () => {
@@ -409,7 +432,7 @@ export default function App() {
           AuthService.persistSession(user, AuthService.isSharedSession());
         }}
         profesoresDisponibles={profesores.length > 0 ? profesores.filter(p => p.estado !== 'INACTIVO') : PROFESORES_INICIALES}
-        pendingSyncCount={0}
+        pendingSyncCount={cambiosSinSubir}
         onManualSync={async () => {
           const res = await GoogleDriveSyncService.pullFromGoogleDrive({ forceRefresh: true });
           if (res.success) {

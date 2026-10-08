@@ -25,14 +25,17 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 - [x] Cambio de contraseña propio desde "Mi perfil".
 - [x] Si el administrador olvida su contraseña: ejecutar `restablecerClaveAdministrador` en el editor
       de Apps Script (solo el propietario del proyecto puede).
-- [ ] Probar en el entorno de pruebas real (servidor v2 publicado en la cuenta de Miguel Ángel).
+- [x] Probado en el entorno de pruebas real (servidor v2 en la cuenta de Miguel Ángel).
 
 ## ⚙️ Fase 2 – Funcionamiento
 
 - [x] Confirmar de verdad que Drive ha guardado; si falla, los cambios quedan pendientes y se reintenta.
-- [ ] No perder un parte si se cierra la pestaña o falla la red antes de subirlo.
-- [ ] Sincronización eficiente: descargar solo lo que cambia (ahora descarga toda la
-      base de datos cada 3 segundos por pestaña, con riesgo de superar los límites de Google).
+- [x] No perder cambios si se cierra la pestaña o falla la red: lo no confirmado se guarda en el
+      navegador (solo hasta que el servidor lo confirma) y se reenvía al volver a entrar con la misma cuenta.
+      Aviso al cerrar la pestaña y contador "Guardando… (n)" en la cabecera.
+- [x] Sincronización eficiente: comprobación cada 10 s; si no hay cambios el servidor responde
+      "sin cambios" (unos 70 bytes) en lugar de enviar toda la base de datos.
+- [ ] Probar la fase 2 en el entorno de pruebas real.
 
 ## 🚀 Paso a producción (cuando las fases 1 y 2 estén terminadas)
 

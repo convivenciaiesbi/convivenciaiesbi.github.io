@@ -228,6 +228,15 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
+              {!isAdmin && pendingSyncCount > 0 && (
+                <span
+                  className="font-mono text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg text-[10px] font-bold"
+                  title="Cambios guardados en este navegador que aún no ha confirmado Google Drive. Se envían solos; no cierre la sesión hasta que desaparezca."
+                >
+                  Guardando… ({pendingSyncCount})
+                </span>
+              )}
+
               {onManualSync && (
                 <button
                   type="button"
