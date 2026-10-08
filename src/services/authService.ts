@@ -266,7 +266,7 @@ export class AuthService {
     if (!clave) {
       return { success: false, error: 'Por favor, introduzca su contraseña de acceso.' };
     }
-    const r = await llamarApi('login', { email, clave });
+    const r = await llamarApi('login', { email, clave }, 60000);
     if (!r.ok || !r.token || !r.usuario) {
       return { success: false, error: r.error || 'No se ha podido iniciar sesión.' };
     }

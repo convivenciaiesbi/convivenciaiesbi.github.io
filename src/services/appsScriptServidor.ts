@@ -40,7 +40,7 @@ var ADMIN_INICIAL = '__ADMIN_INICIAL__';
 var DURACION_SESION_SEG = 21600;   // 6 horas (máximo de CacheService), se renueva con el uso
 var MAX_INTENTOS = 5;
 var BLOQUEO_SEG = 900;             // 15 minutos
-var ITERACIONES_HASH = 400;
+var ITERACIONES_HASH_V1 = 400;   // solo para comprobar claves guardadas con la primera versión del servidor
 var TROZO_CACHE = 90000;
 
 // ------------------------------------------------------------------ Emergencia (solo desde el editor)
@@ -221,9 +221,30 @@ function perfilPublico(p) {
 
 function propiedades() { return PropertiesService.getScriptProperties(); }
 
+/**
+ * Clave secreta del servidor (se crea sola la primera vez). Se guarda en las propiedades
+ * del script, que solo puede ver el propietario del proyecto, igual que las contraseñas.
+ */
+function secretoServidor() {
+  var p = propiedades();
+  var s = p.getProperty('SECRETO_SERVIDOR');
+  if (!s) {
+    s = Utilities.getUuid() + Utilities.getUuid();
+    p.setProperty('SECRETO_SERVIDOR', s);
+  }
+  return s;
+}
+
+/** Cifrado de contraseñas: HMAC-SHA256 con sal propia y secreto del servidor (rápido en Apps Script). */
 function hashClave(clave, sal) {
+  return Utilities.base64Encode(
+    Utilities.computeHmacSha256Signature(sal + '|' + clave, secretoServidor() + sal, Utilities.Charset.UTF_8));
+}
+
+/** Formato de la primera versión del servidor v2 (lento): solo para comprobar y convertir. */
+function hashClaveLento(clave, sal) {
   var v = sal + '|' + clave;
-  for (var i = 0; i < ITERACIONES_HASH; i++) {
+  for (var i = 0; i < ITERACIONES_HASH_V1; i++) {
     v = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, v + sal, Utilities.Charset.UTF_8));
   }
   return v;
@@ -235,6 +256,14 @@ function sha256Hex(texto) {
   for (var i = 0; i < texto.length; i++) { var c = texto.charCodeAt(i) & 255; entrada.push(c > 127 ? c - 256 : c); }
   var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, entrada);
   return bytes.map(function (b) { var h = (b & 255).toString(16); return h.length === 1 ? '0' + h : h; }).join('');
+}
+
+/** Comprueba una contraseña contra lo guardado; si estaba en el formato lento, la convierte. */
+function claveCorrecta(email, clave, guardada) {
+  if (guardada.v === 3) return hashClave(clave, guardada.sal) === guardada.hash;
+  if (hashClaveLento(clave, guardada.sal) !== guardada.hash) return false;
+  fijarClave(email, clave);
+  return true;
 }
 
 function claveGuardada(email) {
@@ -251,7 +280,7 @@ function claveAntigua(db, email) {
 function fijarClave(email, clave) {
   var sal = Utilities.getUuid();
   propiedades().setProperty('CLAVE_' + norm(email),
-    JSON.stringify({ sal: sal, hash: hashClave(clave, sal), fecha: new Date().toISOString() }));
+    JSON.stringify({ v: 3, sal: sal, hash: hashClave(clave, sal), fecha: new Date().toISOString() }));
 }
 
 function tieneClave(db, email) {
@@ -321,7 +350,7 @@ function login(req) {
     var primerAcceso = false;
 
     if (guardada) {
-      if (hashClave(clave, guardada.sal) !== guardada.hash) return claveIncorrecta(email, intentos);
+      if (!claveCorrecta(email, clave, guardada)) return claveIncorrecta(email, intentos);
     } else if (antigua) {
       // Contraseña de la versión anterior: comprobar y convertir al formato nuevo
       if (sha256Hex(clave.trim()) !== antigua) return claveIncorrecta(email, intentos);
@@ -355,7 +384,7 @@ function cambiarClave(req) {
   var db = leerDb();
   var s = sesion(req.token, db);
   var guardada = claveGuardada(s.email);
-  if (!guardada || hashClave(String(req.actual || ''), guardada.sal) !== guardada.hash) {
+  if (!guardada || !claveCorrecta(s.email, String(req.actual || ''), guardada)) {
     fallo('CLAVE_INCORRECTA', 'La contraseña actual no es correcta.');
   }
   validarComplejidad(req.nueva);
