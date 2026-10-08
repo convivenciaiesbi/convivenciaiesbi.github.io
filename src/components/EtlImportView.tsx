@@ -793,7 +793,7 @@ El Amrani Youssef,4º ESO D`;
       p.nombre.toLowerCase().includes(searchTermProfesor.toLowerCase()) ||
       p.apellidos.toLowerCase().includes(searchTermProfesor.toLowerCase()) ||
       p.email.toLowerCase().includes(searchTermProfesor.toLowerCase()) ||
-      p.departamento.toLowerCase().includes(searchTermProfesor.toLowerCase());
+      (p.departamento || '').toLowerCase().includes(searchTermProfesor.toLowerCase());
 
     const estadoProf = p.estado || 'ACTIVO';
     if (filtroEstadoProfesor === 'ACTIVO') return matchesSearch && estadoProf === 'ACTIVO';

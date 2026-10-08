@@ -161,7 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* ========================================================================= */}
           {/* ZONE 3: Friendly Actions & User Profile Area */}
           {/* ========================================================================= */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
             
             {/* Friendly Drive Storage indicator button: visible para administración y botón de refresco en vivo para todos */}
             <div className="flex items-center gap-1">
@@ -175,13 +175,13 @@ export const Header: React.FC<HeaderProps> = ({
                     <Cloud className="w-4 h-4 text-sky-600" />
                     <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-emerald-500 rounded-full ring-1 ring-white" />
                   </div>
-                  <span className="font-semibold">Google Drive</span>
+                  <span className="hidden sm:inline font-semibold">Google Drive</span>
                   {pendingSyncCount > 0 ? (
                     <span className="font-mono text-amber-800 bg-amber-100 px-1.5 py-0.2 rounded text-[10px] font-bold">
                       +{pendingSyncCount}
                     </span>
                   ) : (
-                    <span className="text-emerald-700 text-[10px] font-bold bg-emerald-100/70 px-1.5 py-0.2 rounded border border-emerald-200">
+                    <span className="hidden sm:inline text-emerald-700 text-[10px] font-bold bg-emerald-100/70 px-1.5 py-0.2 rounded border border-emerald-200">
                       Sincronizado
                     </span>
                   )}
@@ -254,12 +254,12 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 {/* Round friendly avatar with user initials */}
                 <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-sky-700 to-sky-500 text-white flex items-center justify-center font-bold text-[11px] shadow-2xs shrink-0">
-                  {currentUser.nombre.charAt(0)}{currentUser.apellidos.charAt(0)}
+                  {(currentUser.nombre || '?').charAt(0)}{(currentUser.apellidos || '').charAt(0)}
                 </div>
 
                 <div className="hidden md:block text-left max-w-[130px] truncate leading-tight">
                   <div className="font-bold text-slate-900 truncate">
-                    {currentUser.nombre} {currentUser.apellidos.split(' ')[0]}
+                    {currentUser.nombre} {(currentUser.apellidos || '').split(' ')[0]}
                   </div>
                   <div className="text-[10px] text-slate-500 truncate flex items-center gap-1">
                     <span className={`w-1.5 h-1.5 rounded-full ${currentRole.dotColor}`} />
@@ -277,7 +277,7 @@ export const Header: React.FC<HeaderProps> = ({
                     className="fixed inset-0 z-40"
                     onClick={() => setUserDropdownOpen(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-84 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 space-y-3">
+                  <div className="absolute right-0 mt-2 w-84 max-w-[calc(100vw-1.5rem)] bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 space-y-3">
                     {/* Welcoming Header Card */}
                     <div className="p-3.5 bg-gradient-to-br from-sky-50 via-slate-50 to-blue-50/40 border border-sky-100 rounded-xl space-y-2">
                       <div className="flex items-center justify-between">

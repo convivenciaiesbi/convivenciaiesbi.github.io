@@ -666,7 +666,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-clip">
       {/* 1. Header with Academic Year Controls & Comparison Switch */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">

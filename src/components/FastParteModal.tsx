@@ -151,7 +151,7 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
   const [isDiferido, setIsDiferido] = useState<boolean>(false);
   const [horaActualRegistro] = useState<string>(getLocalCurrentTime());
   const [descripcionHechos, setDescripcionHechos] = useState<string>('');
-  const [materia, setMateria] = useState<string>(currentUser.departamento.split('/')[0].trim());
+  const [materia, setMateria] = useState<string>((currentUser.departamento || '').split('/')[0].trim());
   const [ubicacion, setUbicacion] = useState<UbicacionCentro>('Aula ordinaria');
   const [ubicacionOtrosDetalle, setUbicacionOtrosDetalle] = useState<string>('');
 
