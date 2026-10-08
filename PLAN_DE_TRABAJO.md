@@ -68,4 +68,8 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       por el parte). El apartado 6 contiene únicamente
       "Los representantes legales pueden contactar con la tutoría o con la Jefatura de Estudios…".
       Sin espacio para firmas.
+- [ ] **Logo del IES (búho) pixelado**: el actual mide 117×97 px. Pendiente de que Miguel Ángel
+      consiga el original en alta resolución (SVG/PDF o PNG ≥ 500 px). No usar `public/logo-ies-blas-infante.jpg`
+      (es otro diseño, no el logo real). Hay un escudo de la Junta con errata sin usar
+      (`andalucia_edu_emblem_*.jpg`) que convendría borrar.
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.
