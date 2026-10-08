@@ -245,11 +245,10 @@ export async function generateOfficialSancionPdf(
 
     // --- 3. Section: Tipificación Normativa y Calificación de la Conducta (V0 - Sección 6) ---
     const tipif = obtenerTipificacionNormativa(sancion.codigo_infraccion);
-    const puntosDeducidos = Math.max(0, sancion.puntos_restados || 0);
 
     doc.setFillColor(254, 242, 242); // rose-50
     doc.setDrawColor(254, 202, 202); // rose-200
-    doc.roundedRect(marginX, curY, contentWidth, 26, 1.5, 1.5, 'FD');
+    doc.roundedRect(marginX, curY, contentWidth, 19.5, 1.5, 1.5, 'FD');
 
     doc.setTextColor(159, 18, 57); // rose-800
     doc.setFont('helvetica', 'bold');
@@ -269,18 +268,9 @@ export async function generateOfficialSancionPdf(
     doc.setTextColor(71, 85, 105);
     doc.text(`Fundamento legal: ${tipif.tipoTexto} · [${tipif.referencia}]`, marginX + 3, curY + 16);
 
-    // Puntos de este parte (sin mostrar los puntos que le quedan al alumno)
-    doc.setFillColor(255, 255, 255);
-    doc.roundedRect(marginX + 2, curY + 18.5, contentWidth - 4, 6, 1, 1, 'F');
-    doc.setTextColor(190, 18, 60);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    const puntosTexto = puntosDeducidos > 0 
-      ? `Deducción en este parte: -${puntosDeducidos} pts` 
-      : 'Incidencia académica: 0 pts';
-    doc.text(puntosTexto, marginX + 4, curY + 22.5);
+    // Por decisión del centro, el parte no muestra puntos (ni los descontados ni los que quedan)
 
-    curY += 29;
+    curY += 22.5;
 
     // --- 4. Section: Hechos Registrados (Descripción objetiva) ---
     doc.setFillColor(248, 250, 252);

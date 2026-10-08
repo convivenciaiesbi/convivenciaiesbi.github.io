@@ -279,7 +279,7 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                 {/* Document Title */}
                 <div className="text-center space-y-1">
                   <h1 className="text-base font-bold uppercase tracking-wider text-slate-900 border-y border-slate-200 py-1 bg-slate-50">
-                    PARTE DISCIPLINARIO Y COMUNICACIÓN DE DEDUCCIÓN DE PUNTOS
+                    BOLETÍN OFICIAL DE SANCIÓN DISCIPLINARIA Y COMUNICACIÓN A FAMILIAS
                   </h1>
                   <p className="text-[10px] text-slate-500 italic">
                     Conforme al Decreto 327/2010 (ROF) y Anexo II del Reglamento de Régimen Interior del Centro
@@ -323,7 +323,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                 {/* 2. Calificación de la Conducta e Impacto en Carnet de 10 Puntos (V0) */}
                 {(() => {
                   const tipif = obtenerTipificacionNormativa(currentSancion.codigo_infraccion);
-                  const puntosDeducidos = Math.max(0, currentSancion.puntos_restados || 0);
 
                   return (
                     <div className="border border-slate-200 rounded-lg p-3.5 space-y-2 text-xs">
@@ -346,13 +345,6 @@ export const OfficialPartePrintModal: React.FC<OfficialPartePrintModalProps> = (
                         </div>
                       </div>
 
-                      <div className="bg-slate-100 p-2.5 rounded-lg font-mono text-xs flex justify-between items-center">
-                        <div>
-                          Deducción en este parte: <strong className={puntosDeducidos > 0 ? 'text-rose-700' : 'text-slate-700'}>
-                            {puntosDeducidos > 0 ? `-${puntosDeducidos} puntos` : '0 puntos (Incidencia académica)'}
-                          </strong>
-                        </div>
-                      </div>
                     </div>
                   );
                 })()}
