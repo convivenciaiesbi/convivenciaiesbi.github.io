@@ -46,6 +46,7 @@ import {
 } from '../data/rofCatalog';
 import { AuthService } from '../services/authService';
 import { StorageService } from '../services/storageService';
+import { EstadoEnvioParte } from './EstadoEnvioParte';
 
 interface FastParteModalProps {
   alumnos: Alumno[];
@@ -353,6 +354,8 @@ export const FastParteModal: React.FC<FastParteModalProps> = ({
             </p>
           </div>
         </div>
+
+        <EstadoEnvioParte idSancion={createdSancion.id_sancion} />
 
         {/* Resumen del movimiento en carnet */}
         <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-4 grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">

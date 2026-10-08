@@ -76,6 +76,7 @@ import {
   Clock
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
+import { AvisoGuardado } from './components/AvisoGuardado';
 import { EVENTO_SESION_CADUCADA } from './services/apiService';
 import { guardarCola, hayCambiosSinSubir, contarCambiosSinSubir } from './services/colaPendiente';
 import { CUENTA_DRIVE } from './config/entorno';
@@ -422,6 +423,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-sky-50/40 via-slate-50 to-blue-50/30 flex flex-col text-slate-800 font-sans selection:bg-sky-200 selection:text-sky-900">
       <EntornoBanner />
+      <AvisoGuardado />
       {/* Top Bar Header with pastel styling & role-based tabs */}
       <Header
         currentView={currentView}

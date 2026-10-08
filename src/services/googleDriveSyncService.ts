@@ -10,6 +10,8 @@ import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/e
 import { llamarApi } from './apiService';
 import { guardarCola, restaurarCola } from './colaPendiente';
 
+export const EVENTO_ESTADO_GUARDADO = 'sigc-estado-guardado';
+
 const SYNC_URL_STORAGE_KEY = 'sigc_bi_drive_sync_api_url_v1';
 const LAST_SYNC_STORAGE_KEY = 'sigc_bi_last_drive_sync_timestamp_v1';
 
@@ -461,18 +463,27 @@ export class GoogleDriveSyncService {
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
       markSent();
       this.lastPushError = null;
+      this.avisarEstadoGuardado(true);
       this.finishPush();
       return { success: true, message: 'Datos guardados en Google Drive.' };
     }
 
     this.lastPushError = respuesta.error || 'Error desconocido al guardar.';
     guardarCola(AuthService.getCurrentUser()?.email);
+    this.avisarEstadoGuardado(false);
     this.finishPush();
     // Reintentar más tarde: los cambios siguen marcados como pendientes
     if (respuesta.codigo !== 'NO_AUTH') {
       setTimeout(() => this.triggerFastSync(0), 15000);
     }
     return { success: false, message: `No se ha podido guardar en Google Drive: ${this.lastPushError}` };
+  }
+
+  /** Notifica a la interfaz si el último guardado llegó a Google Drive. */
+  private static avisarEstadoGuardado(ok: boolean): void {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(EVENTO_ESTADO_GUARDADO, { detail: { ok, error: this.lastPushError } }));
+    }
   }
 
   private static finishPush(): void {
