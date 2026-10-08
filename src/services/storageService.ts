@@ -7,6 +7,7 @@ import { Alumno, Profesor, Sancion, Compensacion, AuditLog, DriveSyncStatus, Gru
 import { ALUMNOS_INICIALES, PROFESORES_INICIALES, SANCIONES_INICIALES, COMPENSACIONES_INICIALES, AUDIT_LOGS_INICIALES, MOVIMIENTOS_INICIALES } from '../data/seedData';
 import { ProfesorImportRow, parsearTextoOcsvProfesores } from './odsImportService';
 import { ES_ENTORNO_PRUEBAS, CUENTA_DRIVE, CARPETA_DRIVE_ID, NOMBRE_UNIDAD_DRIVE } from '../config/entorno';
+import { calcularCarnet, estadoPorSaldo, hoyLocal } from './carnetPuntos';
 
 const KEY_ALUMNOS = 'sigc_bi_alumnos_v3';
 const KEY_PROFESORES = 'sigc_bi_profesores_v2';
@@ -1121,6 +1122,10 @@ export class StorageService {
           (item.descripcion_hechos || '').startsWith('Incidencia registrada según tipificación ROF');
         if (isSynthetic(existing) && !isSynthetic(normalized)) {
           byExpAndStudent.set(key, normalized);
+        } else if (!isSynthetic(existing) && !isSynthetic(normalized) && existing.id_sancion !== normalized.id_sancion) {
+          // Dos partes reales distintos que comparten número de expediente (números antiguos
+          // aleatorios): se conservan ambos.
+          byExpAndStudent.set(`${key}|${normalized.id_sancion}`, normalized);
         }
       }
     });
@@ -1309,9 +1314,12 @@ export class StorageService {
     this.touchLocalWriteTimestamp();
   }
 
+  /**
+   * Histórico de puntos del alumno, calculado a partir de sus partes y medidas restaurativas
+   * (igual en todos los dispositivos). Del más reciente al más antiguo.
+   */
   static getMovimientosPorAlumno(idAlumno: string): MovimientoPuntos[] {
-    const all = this.getMovimientos();
-    return all.filter(m => m.id_alumno === idAlumno);
+    return calcularCarnet(idAlumno, this.getActiveSanciones(), this.getCompensaciones()).movimientos;
   }
 
   static registrarMovimiento(movData: Omit<MovimientoPuntos, 'id_movimiento'>): MovimientoPuntos {
@@ -1510,81 +1518,27 @@ export class StorageService {
     countSanciones: number;
     estado: Alumno['estado'];
   } {
-    const cleanAlumnoId = (idAlumno || '').toLowerCase().trim();
-    const activeSanciones: Sancion[] = this.getActiveSanciones();
-    const movimientos = this.getMovimientos();
-
-    const sancionesAlumno = activeSanciones.filter((s: Sancion) => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId);
-    const totalPuntosPerdidos = sancionesAlumno.reduce((acc: number, s: Sancion) => acc + (Math.max(0, s.puntos_restados || 0)), 0);
-
-    const movsAlumno = movimientos.filter(m => 
-      (m.id_alumno || '').toLowerCase().trim() === cleanAlumnoId && 
-      (m.tipo === 'MEDIDA_RESTAURATIVA' || m.tipo === 'RECUPERACION_SEMANAL')
-    );
-    const totalPuntosRecuperados = movsAlumno.reduce((acc: number, m) => acc + (Math.max(0, m.puntos || 0)), 0);
-
-    const saldoCalculado = Math.max(0, Math.min(10, 10 - totalPuntosPerdidos + totalPuntosRecuperados));
-    const countSanciones = sancionesAlumno.length;
-
-    let estado: Alumno['estado'] = 'ACTIVO';
-    if (saldoCalculado === 0) {
-      estado = 'SALDO_CERO';
-    } else if (saldoCalculado <= 3) {
-      estado = 'ALERTA_PUNTOS';
-    }
-
+    const r = calcularCarnet(idAlumno, this.getActiveSanciones(), this.getCompensaciones());
     return {
-      saldoActual: saldoCalculado,
-      totalPuntosPerdidos,
-      totalPuntosRecuperados,
-      countSanciones,
-      estado,
+      saldoActual: r.saldo,
+      totalPuntosPerdidos: r.totalPuntosPerdidos,
+      totalPuntosRecuperados: r.totalPuntosRecuperados,
+      countSanciones: r.countSanciones,
+      estado: estadoPorSaldo(r.saldo),
     };
   }
 
   /**
-   * Calcula los saldos anterior y resultante cronológicos exactos para un parte histórico.
+   * Saldo justo antes y justo después de un parte, según el orden cronológico real.
    */
   static calcularSaldoHistoricoSancion(idSancion: string): { saldoAnterior: number; saldoResultante: number } {
-    const sanciones: Sancion[] = this.getActiveSanciones();
-    const sancionTarget = sanciones.find((s: Sancion) => s.id_sancion === idSancion);
-    if (!sancionTarget) {
+    const sanciones = this.getActiveSanciones();
+    const target = sanciones.find((s: Sancion) => s.id_sancion === idSancion);
+    if (!target) {
       return { saldoAnterior: 10, saldoResultante: 10 };
     }
-
-    if (sancionTarget.saldo_anterior !== undefined && sancionTarget.saldo_resultante !== undefined) {
-      return {
-        saldoAnterior: sancionTarget.saldo_anterior,
-        saldoResultante: sancionTarget.saldo_resultante,
-      };
-    }
-
-    // Calcular cronológicamente todas las sanciones de este alumno hasta este parte
-    const cleanAlumnoId = (sancionTarget.id_alumno || '').toLowerCase().trim();
-    const sancionesAlumno = sanciones
-      .filter((s: Sancion) => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId)
-      .sort((a: Sancion, b: Sancion) => {
-        const timeA = new Date(`${a.fecha}T${a.hora_incidente || '08:00'}:00`).getTime();
-        const timeB = new Date(`${b.fecha}T${b.hora_incidente || '08:00'}:00`).getTime();
-        return timeA - timeB;
-      });
-
-    let acumulador = 10;
-    let targetSaldoAnt = 10;
-    let targetSaldoRes = 10;
-
-    for (const s of sancionesAlumno) {
-      const prev = acumulador;
-      const desc = Math.max(0, s.puntos_restados || 0);
-      acumulador = Math.max(0, acumulador - desc);
-      if (s.id_sancion === idSancion) {
-        targetSaldoAnt = prev;
-        targetSaldoRes = acumulador;
-        break;
-      }
-    }
-
-    return { saldoAnterior: targetSaldoAnt, saldoResultante: targetSaldoRes };
+    const r = calcularCarnet(target.id_alumno, sanciones, this.getCompensaciones());
+    return r.saldosPorSancion.get(idSancion) || { saldoAnterior: 10, saldoResultante: 10 };
   }
 
   /**
@@ -1630,8 +1584,11 @@ export class StorageService {
     }
 
     const year = new Date().getFullYear();
-    const expedienteNum = `${year}/${String(Math.floor(Math.random() * 900) + 100)}-BI`;
-    const idSancion = `snc-${Date.now()}`;
+    // Número de expediente único: marca de tiempo + sufijo aleatorio (antes eran solo 900
+    // números posibles al año y dos partes con el mismo número se fusionaban al sincronizar).
+    const uniq = `${Date.now().toString(36)}${Math.random().toString(36).substring(2, 5)}`.toUpperCase();
+    const expedienteNum = `${year}/${uniq}-BI`;
+    const idSancion = `snc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const urlPdf = `https://drive.google.com/corp/partes/${year}/${alumno.grupo}/PARTE_${expedienteNum.replace('/', '_')}.pdf`;
 
     const nuevaSancion: Sancion = {
@@ -1651,6 +1608,14 @@ export class StorageService {
     sanciones.unshift(nuevaSancion);
     this.saveSanciones(sanciones);
 
+    // Saldos reales antes/después de este parte según el orden cronológico
+    const tramo = calcularCarnet(alumno.id_alumno, this.getActiveSanciones(), this.getCompensaciones()).saldosPorSancion.get(idSancion);
+    if (tramo) {
+      nuevaSancion.saldo_anterior = tramo.saldoAnterior;
+      nuevaSancion.saldo_resultante = tramo.saldoResultante;
+      this.saveSanciones(this.getSanciones().map(s => (s.id_sancion === idSancion ? nuevaSancion : s)));
+    }
+
     // Recalcular saldo exacto del alumno tras asentar la sanción
     const alumnosActualizados = this.recalcularPuntosAlumnos(alumno.id_alumno);
     const alumnoFinal = alumnosActualizados.find(a => a.id_alumno === alumno.id_alumno) || {
@@ -1660,21 +1625,8 @@ export class StorageService {
       historial_sanciones_count: (alumno.historial_sanciones_count || 0) + 1,
     };
 
-    // Registra movimiento en el histórico de puntos (V0 - Sección 1)
-    this.registrarMovimiento({
-      id_alumno: alumno.id_alumno,
-      fecha: sancionData.fecha || new Date().toISOString().split('T')[0],
-      tipo: 'PARTE',
-      conducta_titulo: `${sancionData.codigo_infraccion}`,
-      puntos: -puntosDescontar,
-      profesor_nombre: sancionData.nombre_profesor,
-      saldo_anterior: puntosPrevios,
-      saldo_resultante: alumnoFinal.puntos_actuales,
-      detalles: sancionData.descripcion_hechos,
-    });
-
     // Auditoría y Alertas mínimas a Jefatura/Convivencia (V0 - Sección 7)
-    let logDetalle = `Parte ${sancionData.codigo_infraccion} a ${alumno.nombre} ${alumno.apellidos} (-${puntosDescontar} pts). Saldo: ${puntosPrevios} -> ${alumnoFinal.puntos_actuales}. Medida: ${sancionData.medida_inmediata_texto || sancionData.medida_inmediata || 'Registrada'}.`;
+    let logDetalle = `Parte ${sancionData.codigo_infraccion} a ${alumno.nombre} ${alumno.apellidos} (-${puntosDescontar} pts). Saldo: ${nuevaSancion.saldo_anterior ?? puntosPrevios} -> ${nuevaSancion.saldo_resultante ?? alumnoFinal.puntos_actuales}. Medida: ${sancionData.medida_inmediata_texto || sancionData.medida_inmediata || 'Registrada'}.`;
     if (saldoCero) {
       logDetalle += ' [ALERTA: Saldo 0 puntos alcanzado - Requiere valoración de Jefatura]';
     }
@@ -1698,9 +1650,9 @@ export class StorageService {
    */
   static recalcularPuntosAlumnos(targetIdAlumno?: string): Alumno[] {
     const alumnos = this.getAlumnos();
-    const sanciones = this.getSanciones();
-    const activeSanciones = sanciones.filter(s => Boolean(s && s.id_sancion));
-    const movimientos = this.getMovimientos();
+    const activeSanciones = this.getActiveSanciones();
+    const compensaciones = this.getCompensaciones();
+    const hoy = hoyLocal();
 
     let modificado = false;
     const cleanTargetId = targetIdAlumno ? targetIdAlumno.toLowerCase().trim() : null;
@@ -1711,32 +1663,15 @@ export class StorageService {
         return alumno;
       }
 
-      // Sanciones activas de este alumno
-      const sancionesAlumno = activeSanciones.filter(s => (s.id_alumno || '').toLowerCase().trim() === cleanAlumnoId);
-      const totalPuntosPerdidos = sancionesAlumno.reduce((acc, s) => acc + (Math.max(0, s.puntos_restados || 0)), 0);
+      const r = calcularCarnet(alumno.id_alumno, activeSanciones, compensaciones, hoy);
+      const nuevoEstado: Alumno['estado'] = alumno.estado === 'BAJA' ? 'BAJA' : estadoPorSaldo(r.saldo);
 
-      // Movimientos de recuperación/compensación de este alumno (excluyendo compensaciones automáticas de partes que ya no restan)
-      const movsAlumno = movimientos.filter(m => 
-        (m.id_alumno || '').toLowerCase().trim() === cleanAlumnoId && 
-        (m.tipo === 'MEDIDA_RESTAURATIVA' || m.tipo === 'RECUPERACION_SEMANAL')
-      );
-      const totalPuntosRecuperados = movsAlumno.reduce((acc, m) => acc + (Math.max(0, m.puntos || 0)), 0);
-
-      // Cálculo del saldo real: 10 - perdidos + recuperados, acotado estrictamente entre 0 y 10
-      const saldoCalculado = Math.max(0, Math.min(10, 10 - totalPuntosPerdidos + totalPuntosRecuperados));
-      const countSanciones = sancionesAlumno.length;
-
-      let nuevoEstado: Alumno['estado'] = alumno.estado;
-      if (alumno.estado !== 'BAJA') {
-        nuevoEstado = saldoCalculado === 0 ? 'SALDO_CERO' : (saldoCalculado <= 3 ? 'ALERTA_PUNTOS' : 'ACTIVO');
-      }
-
-      if (alumno.puntos_actuales !== saldoCalculado || alumno.historial_sanciones_count !== countSanciones || alumno.estado !== nuevoEstado) {
+      if (alumno.puntos_actuales !== r.saldo || alumno.historial_sanciones_count !== r.countSanciones || alumno.estado !== nuevoEstado) {
         modificado = true;
         return {
           ...alumno,
-          puntos_actuales: saldoCalculado,
-          historial_sanciones_count: countSanciones,
+          puntos_actuales: r.saldo,
+          historial_sanciones_count: r.countSanciones,
           estado: nuevoEstado,
         };
       }
@@ -1801,23 +1736,6 @@ export class StorageService {
     const alumnosActualizados = this.recalcularPuntosAlumnos(newAlumnoId);
     const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === newAlumnoId);
 
-    // Si hubo cambio de puntos o de alumno, registrar movimiento aclaratorio
-    if (oldPuntosRestados !== newPuntosRestados || oldAlumnoId !== newAlumnoId) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const difPuntos = oldPuntosRestados - newPuntosRestados;
-      this.registrarMovimiento({
-        id_alumno: newAlumnoId,
-        fecha: todayStr,
-        tipo: 'COMPENSACION',
-        conducta_titulo: `Modificación de parte: ${sancionActualizada.codigo_infraccion} (${sancionActualizada.numero_expediente})`,
-        puntos: difPuntos,
-        profesor_nombre: 'Equipo de Convivencia',
-        saldo_anterior: Math.max(0, (alumnoActualizado?.puntos_actuales || 10) - difPuntos),
-        saldo_resultante: alumnoActualizado?.puntos_actuales || 10,
-        detalles: `Modificación por Equipo de Convivencia: Puntos pasaron de -${oldPuntosRestados} a -${newPuntosRestados} pts. Motivo: ${motivoModificacion.trim() || 'Ajuste de tipificación/hechos'}`
-      });
-    }
-
     // Auditoría inmutable de no repudio
     const expediente = sancionActualizada.numero_expediente || sancionActualizada.id_sancion;
     const nombreAlumno = alumnoActualizado 
@@ -1871,21 +1789,6 @@ export class StorageService {
     const alumnosActualizados = this.recalcularPuntosAlumnos(sancion.id_alumno);
     const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === sancion.id_alumno);
 
-    if (alumnoActualizado && puntosRestituidos > 0) {
-      const todayStr = new Date().toISOString().split('T')[0];
-      this.registrarMovimiento({
-        id_alumno: alumnoActualizado.id_alumno,
-        fecha: todayStr,
-        tipo: 'COMPENSACION',
-        conducta_titulo: `Anulación de parte: ${sancion.codigo_infraccion} (${sancion.numero_expediente || 'Expediente'})`,
-        puntos: puntosRestituidos,
-        profesor_nombre: 'Equipo de Convivencia',
-        saldo_anterior: Math.max(0, alumnoActualizado.puntos_actuales - puntosRestituidos),
-        saldo_resultante: alumnoActualizado.puntos_actuales,
-        detalles: `Parte eliminado por el Equipo de Convivencia. Motivo: ${motivo.trim() || 'Estimación de alegaciones / Corrección de error'}`
-      });
-    }
-
     // 4. Auditoría inmutable de no repudio
     const expediente = sancion.numero_expediente || sancion.id_sancion;
     const nombreAlumno = alumnoActualizado 
@@ -1913,92 +1816,19 @@ export class StorageService {
    * Debe generar un movimiento visible en el histórico:
    * Ejemplo: "28/09/2026 · Recuperación semanal sin nuevas incidencias · +1"
    */
-  static ejecutarRecuperacionSemanal(usuarioEmail = 'sistema@iesblasinfante.es'): {
+  static ejecutarRecuperacionSemanal(_usuarioEmail = 'sistema@iesblasinfante.es'): {
     totalEvaluados: number;
     recuperados: number;
     alumnosBeneficiados: string[];
   } {
-    const alumnos = this.getAlumnos();
-    const sanciones = this.getSanciones();
-    const movimientos = this.getMovimientos();
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const todayStr = now.toISOString().split('T')[0];
-
-    let recuperados = 0;
-    const alumnosBeneficiados: string[] = [];
-
-    alumnos.forEach((alumno, idx) => {
-      // Solo se aplica si tiene menos del saldo máximo ordinario (10 puntos)
-      if (alumno.puntos_actuales >= 10) return;
-
-      // Buscar si tiene sanciones con pérdida de puntos en los últimos 7 días
-      const sancionesRecientes = sanciones.filter(s => {
-        if (s.id_alumno !== alumno.id_alumno) return false;
-        if ((s.puntos_restados || 0) <= 0) return false; // los registros académicos no pierden puntos
-        const f = new Date(s.fecha || s.timestamp);
-        return f >= sevenDaysAgo;
-      });
-
-      if (sancionesRecientes.length > 0) {
-        // Tuvo incidencias con pérdida en la última semana, no califica
-        return;
-      }
-
-      // Verificar que no se le haya aplicado ya una recuperación semanal en los últimos 6 días
-      const sixDaysAgo = new Date(now.getTime() - 6 * 24 * 60 * 60 * 1000);
-      const yaRecupero = movimientos.some(m => {
-        if (m.id_alumno !== alumno.id_alumno) return false;
-        if (m.tipo !== 'RECUPERACION_SEMANAL') return false;
-        const f = new Date(m.fecha);
-        return f >= sixDaysAgo;
-      });
-
-      if (yaRecupero) return;
-
-      // Aplicar recuperación semanal de +1 punto (hasta máx 10)
-      const saldoAnterior = alumno.puntos_actuales;
-      const nuevoSaldo = Math.min(10, saldoAnterior + 1);
-      const nuevoEstado: Alumno['estado'] = nuevoSaldo === 0 ? 'SALDO_CERO' : (nuevoSaldo <= 3 ? 'ALERTA_PUNTOS' : 'ACTIVO');
-
-      alumnos[idx] = {
-        ...alumno,
-        puntos_actuales: nuevoSaldo,
-        estado: nuevoEstado,
-      };
-
-      // Movimiento visible en el histórico (V0 - Sección 3)
-      this.registrarMovimiento({
-        id_alumno: alumno.id_alumno,
-        fecha: todayStr,
-        tipo: 'RECUPERACION_SEMANAL',
-        conducta_titulo: 'Recuperación semanal sin nuevas incidencias',
-        puntos: 1,
-        profesor_nombre: 'Sistema Automático V0',
-        saldo_anterior: saldoAnterior,
-        saldo_resultante: nuevoSaldo,
-        detalles: 'Cumplimiento de 7 días consecutivos sin incidencias disciplinarias (+1 pt)',
-      });
-
-      alumnosBeneficiados.push(`${alumno.nombre} ${alumno.apellidos} (${alumno.grupo}): ${saldoAnterior} -> ${nuevoSaldo} pts`);
-      recuperados++;
-    });
-
-    if (recuperados > 0) {
-      this.saveAlumnos(alumnos);
-      this.addAuditLog(
-        usuarioEmail,
-        'COMPENSAR_PUNTOS',
-        'Sistema/RecuperacionSemanal',
-        `Recuperación semanal automática aplicada a ${recuperados} alumnos (+1 pt cada uno sin incidencias en los últimos 7 días).`
-      );
-    }
-
-    return {
-      totalEvaluados: alumnos.length,
-      recuperados,
-      alumnosBeneficiados,
-    };
+    // La recuperación semanal es automática: se aplica sola al calcular el saldo según las fechas.
+    // Esta función solo actualiza los saldos mostrados e informa de quién ha recuperado algo.
+    const antes = new Map(this.getAlumnos().map(a => [a.id_alumno, a.puntos_actuales]));
+    const despues = this.recalcularPuntosAlumnos();
+    const alumnosBeneficiados = despues
+      .filter(a => (antes.get(a.id_alumno) ?? a.puntos_actuales) < a.puntos_actuales)
+      .map(a => `${a.nombre} ${a.apellidos} (${a.grupo}): ${antes.get(a.id_alumno)} -> ${a.puntos_actuales} pts`);
+    return { totalEvaluados: despues.length, recuperados: alumnosBeneficiados.length, alumnosBeneficiados };
   }
 
   /**
@@ -2010,50 +1840,43 @@ export class StorageService {
     puntosRecuperar: number,
     descripcionMedida: string,
     profesorNombre: string,
-    usuarioEmail: string
-  ): { alumnoActualizado: Alumno; nuevoSaldo: number } {
-    const alumnos = this.getAlumnos();
-    const idx = alumnos.findIndex(a => a.id_alumno === idAlumno);
-    if (idx === -1) {
+    usuarioEmail: string,
+    tipoTarea: Compensacion['tipo_tarea'] = 'Taller de resolución pacífica y mediación'
+  ): { alumnoActualizado: Alumno; nuevoSaldo: number; compensacion: Compensacion } {
+    const alumno = this.getAlumnos().find(a => a.id_alumno === idAlumno);
+    if (!alumno) {
       throw new Error(`Alumno no encontrado: ${idAlumno}`);
     }
 
-    const alumno = alumnos[idx];
-    const saldoAnterior = alumno.puntos_actuales;
-    const nuevoSaldo = Math.min(10, saldoAnterior + Math.max(1, puntosRecuperar));
-    const nuevoEstado: Alumno['estado'] = nuevoSaldo === 0 ? 'SALDO_CERO' : (nuevoSaldo <= 3 ? 'ALERTA_PUNTOS' : 'ACTIVO');
+    const saldoAnterior = this.calcularSaldoAlumno(idAlumno).saldoActual;
+    const puntos = Math.max(1, Math.round(puntosRecuperar) || 1);
 
-    const alumnoActualizado: Alumno = {
-      ...alumno,
-      puntos_actuales: nuevoSaldo,
-      estado: nuevoEstado,
+    // Se guarda como compensación para que viaje a Google Drive y la vean todos los dispositivos
+    const compensacion: Compensacion = {
+      id_compensacion: `cmp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: new Date().toISOString(),
+      id_alumno: idAlumno,
+      id_profesor_autoriza: usuarioEmail,
+      nombre_profesor_autoriza: profesorNombre,
+      puntos_recuperados: puntos,
+      tipo_tarea: tipoTarea,
+      descripcion_tarea: descripcionMedida,
+      fecha_completada: hoyLocal(),
     };
-    alumnos[idx] = alumnoActualizado;
-    this.saveAlumnos(alumnos);
+    this.saveCompensaciones([...this.getCompensaciones(), compensacion]);
 
-    const todayStr = new Date().toISOString().split('T')[0];
-
-    // Registrar en movimientos
-    this.registrarMovimiento({
-      id_alumno: alumno.id_alumno,
-      fecha: todayStr,
-      tipo: 'MEDIDA_RESTAURATIVA',
-      conducta_titulo: 'Medida educativa/restaurativa cumplida',
-      puntos: puntosRecuperar,
-      profesor_nombre: profesorNombre,
-      saldo_anterior: saldoAnterior,
-      saldo_resultante: nuevoSaldo,
-      detalles: descripcionMedida,
-    });
+    const alumnosActualizados = this.recalcularPuntosAlumnos(idAlumno);
+    const alumnoActualizado = alumnosActualizados.find(a => a.id_alumno === idAlumno) || alumno;
+    const nuevoSaldo = alumnoActualizado.puntos_actuales;
 
     this.addAuditLog(
       usuarioEmail,
       'COMPENSAR_PUNTOS',
       `MedidaRestaurativa/${alumno.nombre} ${alumno.apellidos}`,
-      `Medida educativa/restaurativa registrada por Jefatura/Convivencia: "${descripcionMedida}" (+${puntosRecuperar} pts). Saldo: ${saldoAnterior} -> ${nuevoSaldo}.`
+      `Medida educativa/restaurativa registrada por Jefatura/Convivencia: "${descripcionMedida}" (+${puntos} pts). Saldo: ${saldoAnterior} -> ${nuevoSaldo}.`
     );
 
-    return { alumnoActualizado, nuevoSaldo };
+    return { alumnoActualizado, nuevoSaldo, compensacion };
   }
 
   /**
@@ -2063,13 +1886,15 @@ export class StorageService {
     compensacionData: Omit<Compensacion, 'id_compensacion' | 'timestamp'>,
     usuarioEmail: string
   ): { compensacion: Compensacion; alumnoActualizado: Alumno } {
-    return this.registrarMedidaRestaurativa(
+    const res = this.registrarMedidaRestaurativa(
       compensacionData.id_alumno,
       compensacionData.puntos_recuperados,
-      `${compensacionData.tipo_tarea}: ${compensacionData.descripcion_tarea}`,
+      compensacionData.descripcion_tarea,
       compensacionData.nombre_profesor_autoriza,
-      usuarioEmail
-    ) as any;
+      usuarioEmail,
+      compensacionData.tipo_tarea
+    );
+    return { compensacion: res.compensacion, alumnoActualizado: res.alumnoActualizado };
   }
 
   static actualizarTramitacion(

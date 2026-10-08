@@ -331,9 +331,9 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
     try {
       const res = StorageService.ejecutarRecuperacionSemanal(currentUser.email);
       if (res.recuperados > 0) {
-        setRecuperacionMsg(`¡Regla semanal aplicada! ${res.recuperados} alumnos recuperaron +1 punto por completar 7 días sin incidencias.`);
+        setRecuperacionMsg(`Saldos actualizados: ${res.recuperados} alumnos han recuperado puntos por la regla semanal automática.`);
       } else {
-        setRecuperacionMsg('Comprobación completada: no hay alumnos que cumplan el ciclo de 7 días sin incidencias pendiente de recuperar.');
+        setRecuperacionMsg('Saldos al día. La recuperación semanal se aplica automáticamente.');
       }
       if (onDataChanged) onDataChanged();
     } catch (e: any) {
@@ -430,10 +430,10 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
                 onClick={handleTriggerWeeklyRecovery}
                 disabled={isExecutingWeekly}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                title="Comprueba automáticamente si algún alumno lleva 7 días sin incidencias y le recupera +1 punto"
+                title="La recuperación semanal (+1 punto cada 7 días sin partes) se aplica sola. Este botón solo actualiza los saldos en pantalla."
               >
                 <RotateCcw className={`w-3.5 h-3.5 ${isExecutingWeekly ? 'animate-spin' : ''}`} />
-                <span>Aplicar Regla Semanal (+1 pt)</span>
+                <span>Actualizar saldos (recuperación automática)</span>
               </button>
 
               {alumnos.length > 0 && (

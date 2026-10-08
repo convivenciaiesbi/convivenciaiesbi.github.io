@@ -1,0 +1,215 @@
+/**
+ * Cálculo del Carnet de Puntos.
+ *
+ * El saldo de cada alumno se obtiene repasando EN ORDEN DE FECHA todo lo que le ha ocurrido,
+ * de modo que el resultado es siempre el mismo en todos los dispositivos y solo depende de
+ * datos que se guardan en Google Drive (partes y medidas restaurativas):
+ *
+ *  - Saldo inicial: 10 puntos.
+ *  - Parte con puntos: resta sus puntos (mínimo 0).
+ *  - Medida educativa/restaurativa cumplida: suma sus puntos (máximo 10).
+ *  - Recuperación semanal automática: cada 7 días naturales seguidos sin ningún parte que
+ *    reste puntos, +1 punto (máximo 10). El contador se reinicia con cada parte que resta
+ *    puntos; los registros de 0 puntos no lo interrumpen. Se aplica al empezar el día 7.
+ */
+
+import { Sancion, Compensacion, MovimientoPuntos } from '../types/convivencia';
+
+export const SALDO_INICIAL = 10;
+export const SALDO_MAXIMO = 10;
+export const DIAS_RECUPERACION = 7;
+
+const MIN_POR_DIA = 24 * 60;
+
+export interface ResultadoCarnet {
+  saldo: number;
+  totalPuntosPerdidos: number;
+  totalPuntosRecuperados: number;
+  /** Número de partes del alumno (incluye registros de 0 puntos). */
+  countSanciones: number;
+  /** Histórico de movimientos, del más reciente al más antiguo. */
+  movimientos: MovimientoPuntos[];
+  /** Saldo justo antes y justo después de cada parte. */
+  saldosPorSancion: Map<string, { saldoAnterior: number; saldoResultante: number }>;
+}
+
+/** Número de día (UTC) de una fecha 'YYYY-MM-DD' o ISO. NaN si no es válida. */
+export function diaDeFecha(fecha?: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec((fecha || '').trim());
+  if (!m) return NaN;
+  return Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000);
+}
+
+function minutosDeHora(hora?: string): number {
+  const m = /^(\d{1,2}):(\d{2})/.exec((hora || '').trim());
+  return m ? Math.min(23, +m[1]) * 60 + Math.min(59, +m[2]) : 8 * 60;
+}
+
+function fechaDeDia(dia: number): string {
+  return new Date(dia * 86400000).toISOString().split('T')[0];
+}
+
+/** Fecha local de hoy como 'YYYY-MM-DD'. */
+export function hoyLocal(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+interface Evento {
+  t: number; // minutos desde época (día * 1440 + minuto del día)
+  orden: string; // desempate estable
+  tipo: 'PARTE' | 'MEDIDA';
+  sancion?: Sancion;
+  compensacion?: Compensacion;
+}
+
+const mismoAlumno = (a?: string, b?: string) =>
+  (a || '').toLowerCase().trim() === (b || '').toLowerCase().trim();
+
+/**
+ * Calcula el carnet de un alumno a partir de sus partes y medidas restaurativas.
+ * @param hasta fecha (YYYY-MM-DD) hasta la que se aplican recuperaciones semanales; por defecto hoy.
+ */
+export function calcularCarnet(
+  idAlumno: string,
+  sanciones: Sancion[],
+  compensaciones: Compensacion[],
+  hasta: string = hoyLocal()
+): ResultadoCarnet {
+  const eventos: Evento[] = [];
+
+  for (const s of sanciones) {
+    if (!s || !s.id_sancion || !mismoAlumno(s.id_alumno, idAlumno)) continue;
+    const dia = diaDeFecha(s.fecha) || diaDeFecha(s.timestamp);
+    if (isNaN(dia)) continue;
+    eventos.push({
+      t: dia * MIN_POR_DIA + minutosDeHora(s.hora_incidente),
+      orden: `${s.timestamp || ''}|${s.id_sancion}`,
+      tipo: 'PARTE',
+      sancion: s,
+    });
+  }
+
+  for (const c of compensaciones) {
+    if (!c || !c.id_compensacion || !mismoAlumno(c.id_alumno, idAlumno)) continue;
+    const dia = diaDeFecha(c.fecha_completada) || diaDeFecha(c.timestamp);
+    if (isNaN(dia)) continue;
+    // Hora local (la de los partes también es hora local), no la hora UTC del timestamp
+    const ts = new Date(c.timestamp || '');
+    const minutos = isNaN(ts.getTime()) ? 12 * 60 : ts.getHours() * 60 + ts.getMinutes();
+    eventos.push({
+      t: dia * MIN_POR_DIA + minutos,
+      orden: `${c.timestamp || ''}|${c.id_compensacion}`,
+      tipo: 'MEDIDA',
+      compensacion: c,
+    });
+  }
+
+  eventos.sort((a, b) => a.t - b.t || a.orden.localeCompare(b.orden));
+
+  let saldo = SALDO_INICIAL;
+  let totalPuntosPerdidos = 0;
+  let totalPuntosRecuperados = 0;
+  let countSanciones = 0;
+  const movimientos: MovimientoPuntos[] = [];
+  const saldosPorSancion = new Map<string, { saldoAnterior: number; saldoResultante: number }>();
+
+  // Día del último parte que restó puntos (desde él se cuentan las semanas) y semanas ya aplicadas
+  let diaUltimoParte: number | null = null;
+  let semanasAplicadas = 0;
+
+  const aplicarRecuperacionesHasta = (tLimite: number) => {
+    if (diaUltimoParte === null) return;
+    for (;;) {
+      const diaRecuperacion = diaUltimoParte + DIAS_RECUPERACION * (semanasAplicadas + 1);
+      if (diaRecuperacion * MIN_POR_DIA > tLimite) return;
+      semanasAplicadas++;
+      if (saldo >= SALDO_MAXIMO) continue; // con el carnet lleno no hay nada que recuperar
+      const anterior = saldo;
+      saldo = Math.min(SALDO_MAXIMO, saldo + 1);
+      totalPuntosRecuperados += saldo - anterior;
+      movimientos.push({
+        id_movimiento: `rec-${idAlumno}-${diaRecuperacion}`,
+        id_alumno: idAlumno,
+        fecha: fechaDeDia(diaRecuperacion),
+        tipo: 'RECUPERACION_SEMANAL',
+        conducta_titulo: 'Recuperación semanal sin nuevas incidencias',
+        puntos: 1,
+        profesor_nombre: 'Automático',
+        saldo_anterior: anterior,
+        saldo_resultante: saldo,
+        detalles: `${DIAS_RECUPERACION} días consecutivos sin partes que resten puntos (+1 pt)`,
+      });
+    }
+  };
+
+  for (const ev of eventos) {
+    aplicarRecuperacionesHasta(ev.t);
+
+    if (ev.tipo === 'PARTE' && ev.sancion) {
+      const s = ev.sancion;
+      countSanciones++;
+      const puntos = Math.max(0, Number(s.puntos_restados) || 0);
+      const anterior = saldo;
+      saldo = Math.max(0, saldo - puntos);
+      totalPuntosPerdidos += puntos;
+      saldosPorSancion.set(s.id_sancion, { saldoAnterior: anterior, saldoResultante: saldo });
+      if (puntos > 0) {
+        diaUltimoParte = Math.floor(ev.t / MIN_POR_DIA);
+        semanasAplicadas = 0;
+      }
+      movimientos.push({
+        id_movimiento: `parte-${s.id_sancion}`,
+        id_alumno: idAlumno,
+        fecha: s.fecha,
+        tipo: 'PARTE',
+        conducta_titulo: s.codigo_infraccion,
+        puntos: -puntos,
+        profesor_nombre: s.nombre_profesor,
+        saldo_anterior: anterior,
+        saldo_resultante: saldo,
+        detalles: s.descripcion_hechos,
+      });
+    } else if (ev.tipo === 'MEDIDA' && ev.compensacion) {
+      const c = ev.compensacion;
+      const puntos = Math.max(0, Number(c.puntos_recuperados) || 0);
+      const anterior = saldo;
+      saldo = Math.min(SALDO_MAXIMO, saldo + puntos);
+      totalPuntosRecuperados += saldo - anterior;
+      movimientos.push({
+        id_movimiento: `medida-${c.id_compensacion}`,
+        id_alumno: idAlumno,
+        fecha: (c.fecha_completada || c.timestamp || '').split('T')[0],
+        tipo: 'MEDIDA_RESTAURATIVA',
+        conducta_titulo: 'Medida educativa/restaurativa cumplida',
+        puntos,
+        profesor_nombre: c.nombre_profesor_autoriza,
+        saldo_anterior: anterior,
+        saldo_resultante: saldo,
+        detalles: c.descripcion_tarea,
+      });
+    }
+  }
+
+  const diaHasta = diaDeFecha(hasta);
+  if (!isNaN(diaHasta)) {
+    aplicarRecuperacionesHasta(diaHasta * MIN_POR_DIA + MIN_POR_DIA - 1);
+  }
+
+  return {
+    saldo,
+    totalPuntosPerdidos,
+    totalPuntosRecuperados,
+    countSanciones,
+    movimientos: movimientos.reverse(),
+    saldosPorSancion,
+  };
+}
+
+export function estadoPorSaldo(saldo: number): 'ACTIVO' | 'ALERTA_PUNTOS' | 'SALDO_CERO' {
+  if (saldo === 0) return 'SALDO_CERO';
+  if (saldo <= 3) return 'ALERTA_PUNTOS';
+  return 'ACTIVO';
+}
