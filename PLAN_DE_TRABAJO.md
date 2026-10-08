@@ -62,4 +62,6 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       de su alumnado, las medidas restaurativas y los teléfonos de las familias de su grupo.
       La tutoría la asigna Jefatura o el propio docente en su perfil (solo si el grupo no tiene tutor);
       Jefatura ve "(indicada por el docente)" y puede cambiarla. El servidor aplica las mismas reglas.
+- [x] **Restitución manual de puntos**: Jefatura/Convivencia escribe directamente de 1 a 10 puntos
+      (campo numérico), con atajo "Completar hasta 10" y aviso si se supera el máximo.
 - [ ] Siguientes funcionalidades: pendientes de que Miguel Ángel las detalle.

@@ -1882,7 +1882,7 @@ export class StorageService {
     }
 
     const saldoAnterior = this.calcularSaldoAlumno(idAlumno).saldoActual;
-    const puntos = Math.max(1, Math.round(puntosRecuperar) || 1);
+    const puntos = Math.max(1, Math.min(10, Math.round(puntosRecuperar) || 1));
 
     // Se guarda como compensación para que viaje a Google Drive y la vean todos los dispositivos
     const compensacion: Compensacion = {

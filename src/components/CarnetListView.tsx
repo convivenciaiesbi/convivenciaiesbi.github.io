@@ -348,6 +348,7 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
   const handleConfirmMedidaRestaurativa = (e: React.FormEvent) => {
     e.preventDefault();
     if (!medidaModalAlumno) return;
+    if (!Number.isInteger(puntosMedida) || puntosMedida < 1 || puntosMedida > 10) return;
 
     try {
       StorageService.registrarMedidaRestaurativa(
@@ -1120,25 +1121,43 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
 
             <form onSubmit={handleConfirmMedidaRestaurativa} className="space-y-4 text-xs">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Puntos a restituir (hasta máx 10):
+                <label htmlFor="puntos-medida" className="block font-semibold text-slate-700 mb-1">
+                  Puntos a restituir (de 1 a 10):
                 </label>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map(pts => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    id="puntos-medida"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={10}
+                    step={1}
+                    required
+                    autoFocus
+                    value={Number.isFinite(puntosMedida) && puntosMedida > 0 ? puntosMedida : ''}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10);
+                      setPuntosMedida(Number.isFinite(v) ? Math.max(1, Math.min(10, v)) : NaN);
+                    }}
+                    className="w-24 rounded-xl border border-slate-300 px-3 py-2 text-base font-mono font-bold text-center bg-white focus:border-sky-600 focus:ring-1 focus:ring-sky-600"
+                  />
+                  <span className="text-slate-500">puntos</span>
+                  {medidaModalAlumno.puntos_actuales < 10 && (
                     <button
-                      key={pts}
                       type="button"
-                      onClick={() => setPuntosMedida(pts)}
-                      className={`px-3 py-1.5 rounded-lg font-mono font-bold cursor-pointer ${
-                        puntosMedida === pts
-                          ? 'bg-sky-600 text-white'
-                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
+                      onClick={() => setPuntosMedida(10 - medidaModalAlumno.puntos_actuales)}
+                      className="ml-auto px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                      title="Devolver exactamente los puntos que le faltan para llegar a 10"
                     >
-                      +{pts} pts
+                      Completar hasta 10 (+{10 - medidaModalAlumno.puntos_actuales})
                     </button>
-                  ))}
+                  )}
                 </div>
+                {Number.isFinite(puntosMedida) && medidaModalAlumno.puntos_actuales + puntosMedida > 10 && (
+                  <p className="mt-1.5 text-[11px] text-amber-800">
+                    El carnet no puede pasar de 10: se sumarán {Math.max(0, 10 - medidaModalAlumno.puntos_actuales)} punto(s).
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1156,7 +1175,7 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
               </div>
 
               <div className="bg-sky-50 p-3 rounded-xl text-[11px] text-sky-950 font-mono">
-                Saldo: {medidaModalAlumno.puntos_actuales} → <strong>{Math.min(10, medidaModalAlumno.puntos_actuales + puntosMedida)} / 10 pts</strong>
+                Saldo: {medidaModalAlumno.puntos_actuales} → <strong>{Math.min(10, medidaModalAlumno.puntos_actuales + (Number.isFinite(puntosMedida) ? puntosMedida : 0))} / 10 pts</strong>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
