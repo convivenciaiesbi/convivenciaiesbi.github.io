@@ -40,6 +40,10 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 
 - [ ] Copia de seguridad del JSON real.
 - [ ] Listado de cambios de saldo para Jefatura (ver recordatorio).
+- [ ] Crear el ID de cliente de Google (Google Cloud) con la cuenta del centro
+      `14007180.aplicaciones@g.educaand.es`, público "Interno", origen
+      `https://convivenciaiesbi.github.io`, y ponerlo en `src/config/entorno.ts` (PRODUCCION).
+      El de pruebas está en la cuenta de Miguel Ángel.
 - [ ] Publicar el programa de Apps Script nuevo en la cuenta del centro.
 - [ ] Cambiar `ENTORNO` a `'PRODUCCION'` y publicar.
 
