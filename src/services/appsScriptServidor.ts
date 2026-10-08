@@ -43,6 +43,26 @@ var BLOQUEO_SEG = 900;             // 15 minutos
 var ITERACIONES_HASH = 400;
 var TROZO_CACHE = 90000;
 
+// ------------------------------------------------------------------ Emergencia (solo desde el editor)
+
+/**
+ * Si el administrador olvida su contraseña: abrir este proyecto en script.google.com,
+ * elegir esta función en el desplegable de arriba y pulsar "Ejecutar".
+ * En su próximo acceso a la app escribirá dos veces una contraseña nueva.
+ * Solo puede ejecutarla quien tenga acceso a este proyecto de Apps Script.
+ */
+function restablecerClaveAdministrador() {
+  var email = norm(ADMIN_INICIAL);
+  propiedades().deleteProperty('CLAVE_' + email);
+  CacheService.getScriptCache().remove('FALLOS_' + email);
+  var db = leerDb();
+  if (claveAntigua(db, email)) {
+    for (var k in db.credenciales_profesores) { if (norm(k) === email) delete db.credenciales_profesores[k]; }
+    escribirDb(db);
+  }
+  Logger.log('Contraseña de ' + email + ' restablecida. Fije una nueva en el próximo acceso a la app.');
+}
+
 // ------------------------------------------------------------------ Entrada
 
 function doGet(e) {

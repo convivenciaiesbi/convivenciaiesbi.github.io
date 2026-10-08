@@ -23,6 +23,8 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
       ajenos ni auditoría, y solo puede guardar sus partes y el estado del Aula PAC.
 - [x] Las contraseñas de la versión 1 siguen valiendo y se convierten al formato nuevo en el primer acceso.
 - [x] Cambio de contraseña propio desde "Mi perfil".
+- [x] Si el administrador olvida su contraseña: ejecutar `restablecerClaveAdministrador` en el editor
+      de Apps Script (solo el propietario del proyecto puede).
 - [ ] Probar en el entorno de pruebas real (servidor v2 publicado en la cuenta de Miguel Ángel).
 
 ## ⚙️ Fase 2 – Funcionamiento
