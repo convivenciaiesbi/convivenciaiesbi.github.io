@@ -36,8 +36,14 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 - [x] Sincronización eficiente: comprobación cada 10 s; si no hay cambios el servidor responde
       "sin cambios" (unos 70 bytes) en lugar de enviar toda la base de datos.
 - [ ] Probar la fase 2 en el entorno de pruebas real.
+- [x] Aviso visible de cambios guardados solo en el dispositivo (franja ámbar y estado en la confirmación del parte).
 
-## 🚀 Paso a producción (cuando las fases 1 y 2 estén terminadas)
+## 🚀 Paso a producción (cuando Miguel Ángel lo indique)
+
+> Decisión (8/10/2026): Miguel Ángel avisará cuando quiera pasar a producción, tras las nuevas
+> funcionalidades. En ese momento: guía paso a paso, muy detallada y explícita.
+> Mientras tanto, la app real sigue con el servidor v1: su dirección /exec responde a cualquiera
+> (datos expuestos). Solo se corrige al publicar a la vez el servidor v2 y la app nueva.
 
 > ⚠️ **RECORDATORIO OBLIGATORIO antes de sustituir la app en uso:**
 > Con la recuperación semanal automática, el alumnado que lleva semanas sin partes
