@@ -50,11 +50,22 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 > **recuperará puntos de golpe** al activar esta versión. Avisar a Jefatura y preparar
 > antes un listado comparando el saldo actual y el nuevo de cada alumno.
 
-- [ ] Copia de seguridad del JSON real.
-- [ ] Listado de cambios de saldo para Jefatura (ver recordatorio).
-- [ ] Publicar el servidor v2 en la cuenta del centro (sustituye al actual; mantener la misma URL
-      con "Gestionar implementaciones > Editar > Nueva versión").
-- [ ] Cambiar `ENTORNO` a `'PRODUCCION'` y publicar.
+Procedimiento acordado (8/10/2026), unos 60–90 min, fuera del horario de clase:
+
+1. [Claude, ~30–45 min] Preparar producción: en el servidor v2, al primer uso, **copia de seguridad
+   automática** del JSON en la carpeta de Drive y **foto de los saldos actuales**; pantalla de
+   **informe de cambios de saldo** para Jefatura; generar el servidor de producción y probarlo.
+2. [Miguel Ángel, ~10 min] En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`:
+   pegar el servidor de producción y crear una **implementación NUEVA** (no editar la actual, para que
+   la app en uso siga funcionando). Pasar a Claude la dirección `/exec` nueva.
+3. [Claude, ~10 min] Poner esa dirección y `ENTORNO = 'PRODUCCION'`, publicar en
+   `convivenciaiesbi/convivenciaiesbi.github.io` y comprobar la publicación.
+4. [Miguel Ángel, ~10–15 min] Entrar en la app real y comprobar datos y funcionamiento.
+5. [Miguel Ángel, 1 min] Solo si todo va bien: **archivar la implementación antigua** (cierra la
+   exposición de datos). Hasta entonces, vuelta atrás posible en ~5 min republicando la web anterior.
+
+Avisar a Jefatura de los saldos (recordatorio de arriba) y de que todo el profesorado tendrá que
+volver a iniciar sesión (con su contraseña de siempre).
 
 ## ✨ Fase 3 – Nuevas funcionalidades
 
