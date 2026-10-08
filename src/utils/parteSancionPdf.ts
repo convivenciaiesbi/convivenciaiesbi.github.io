@@ -42,6 +42,27 @@ export function textoSancion(exp: ExpedienteSancion, alumno: Alumno): string {
   );
 }
 
+/** Escribe una línea repartiendo el espacio sobrante entre las palabras (texto justificado). */
+function lineaJustificada(doc: jsPDF, linea: string, x: number, y: number, ancho: number): void {
+  const palabras = linea.trim().split(/\s+/);
+  if (palabras.length < 2) {
+    doc.text(linea, x, y);
+    return;
+  }
+  const anchoPalabras = palabras.reduce((acc, p) => acc + doc.getTextWidth(p), 0);
+  const hueco = (ancho - anchoPalabras) / (palabras.length - 1);
+  // Si el hueco resultase exagerado (línea muy corta), no se justifica
+  if (hueco > doc.getTextWidth(' ') * 4) {
+    doc.text(linea, x, y);
+    return;
+  }
+  let cx = x;
+  palabras.forEach((p) => {
+    doc.text(p, cx, y);
+    cx += doc.getTextWidth(p) + hueco;
+  });
+}
+
 export async function generarParteSancionPdf(
   exp: ExpedienteSancion,
   alumno: Alumno,
@@ -92,7 +113,8 @@ export async function generarParteSancionPdf(
     const lineas: string[] = doc.splitTextToSize(texto, anchoTexto);
     lineas.forEach((l, i) => {
       const ultima = i === lineas.length - 1;
-      doc.text(l, mX, y, ultima ? undefined : { align: 'justify', maxWidth: anchoTexto });
+      if (ultima) doc.text(l, mX, y);
+      else lineaJustificada(doc, l, mX, y, anchoTexto);
       y += inter;
     });
   };
@@ -139,7 +161,10 @@ export async function generarParteSancionPdf(
   let yA = y + 6;
   lineasAviso.forEach((l, i) => {
     const siguienteVacia = i + 1 >= lineasAviso.length || lineasAviso[i + 1] === '';
-    if (l) doc.text(l, mX + 4, yA, siguienteVacia ? undefined : { align: 'justify', maxWidth: anchoTexto - 8 });
+    if (l) {
+      if (siguienteVacia) doc.text(l, mX + 4, yA);
+      else lineaJustificada(doc, l, mX + 4, yA, anchoTexto - 8);
+    }
     yA += 4.4;
   });
 
