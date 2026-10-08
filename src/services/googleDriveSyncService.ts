@@ -41,6 +41,9 @@ export class GoogleDriveSyncService {
   private static isPushing: boolean = false;
   private static pendingPushQueued: boolean = false;
   private static lastRemoteTimestamp: string | null = null;
+  // Se incrementa cada vez que termina una subida. Una descarga que empezó antes
+  // de esa subida trae datos anteriores a ella y no debe aplicarse.
+  private static pushEpoch: number = 0;
 
   /**
    * Dispara una sincronización rápida no bloqueante con debounce.
@@ -157,6 +160,8 @@ export class GoogleDriveSyncService {
       };
     }
 
+    const pushEpochAtStart = this.pushEpoch;
+
     try {
       const controller = new AbortController();
       // Timeout ágil para no bloquear la interfaz en redes lentas
@@ -203,6 +208,16 @@ export class GoogleDriveSyncService {
 
       if (!remoteData || typeof remoteData !== 'object') {
         throw new Error('Respuesta inválida del servidor de Google Drive: formato no reconocido.');
+      }
+
+      // Si mientras esperábamos la respuesta terminó una subida desde este dispositivo,
+      // esta respuesta es anterior a esa subida: descartarla para no borrar lo recién guardado.
+      if (this.pushEpoch !== pushEpochAtStart) {
+        return {
+          success: true,
+          notModified: true,
+          message: 'Lectura descartada: se ha guardado información más reciente durante la descarga.',
+        };
       }
 
       this.lastRemoteTimestamp = remoteData.timestamp || new Date().toISOString();
@@ -461,6 +476,16 @@ export class GoogleDriveSyncService {
 
     const payload = this.getFullDatabasePayload();
     const jsonString = JSON.stringify(payload);
+    // Solo se dan por subidos los cambios incluidos en este envío; los que lleguen
+    // mientras tanto siguen pendientes para el siguiente.
+    const sentSancionIds = StorageService.getPendingSyncSancionIds();
+    const sentAlumnoIds = StorageService.getPendingSyncAlumnoIds();
+    const markSent = () => {
+      this.pushEpoch++;
+      StorageService.clearPendingSyncSancionIds(sentSancionIds.length ? sentSancionIds : ['__ninguno__']);
+      StorageService.clearPendingSyncProfesorEmails();
+      StorageService.clearPendingSyncAlumnoIds(sentAlumnoIds);
+    };
 
     // 1. Envío estándar con text/plain (CORS-safelisted, sin preflight OPTIONS y sin envoltorio data=)
     try {
@@ -477,9 +502,7 @@ export class GoogleDriveSyncService {
       clearTimeout(timeoutId);
 
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
-      StorageService.clearPendingSyncSancionIds();
-      StorageService.clearPendingSyncProfesorEmails();
-      StorageService.clearPendingSyncAlumnoIds();
+      markSent();
       this.finishPush();
       return {
         success: true,
@@ -500,9 +523,7 @@ export class GoogleDriveSyncService {
         body: formBody.toString(),
       });
       localStorage.setItem(LAST_SYNC_STORAGE_KEY, new Date().toISOString());
-      StorageService.clearPendingSyncSancionIds();
-      StorageService.clearPendingSyncProfesorEmails();
-      StorageService.clearPendingSyncAlumnoIds();
+      markSent();
       this.finishPush();
       return {
         success: true,

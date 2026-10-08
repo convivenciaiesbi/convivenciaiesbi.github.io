@@ -1206,8 +1206,13 @@ export class StorageService {
     }
   }
 
-  static clearPendingSyncAlumnoIds(): void {
-    memoryPendingSyncAlumnos = [];
+  static clearPendingSyncAlumnoIds(idsToRemove?: string[]): void {
+    if (!idsToRemove) {
+      memoryPendingSyncAlumnos = [];
+      return;
+    }
+    const remove = new Set(idsToRemove);
+    memoryPendingSyncAlumnos = memoryPendingSyncAlumnos.filter(id => !remove.has(id));
   }
 
   static getDeletedAlumnoIds(): string[] {
@@ -2228,6 +2233,7 @@ export class StorageService {
         }
 
         indexAlumno(existingAlumno);
+        this.addPendingSyncAlumnoId(existingAlumno.id_alumno);
         actualizados++;
       } else {
         const newStudent: Alumno = {
@@ -2244,6 +2250,7 @@ export class StorageService {
 
         currentAlumnos.push(newStudent);
         indexAlumno(newStudent);
+        this.addPendingSyncAlumnoId(newStudent.id_alumno);
         nuevos++;
       }
     }
@@ -2353,6 +2360,7 @@ export class StorageService {
         }
 
         indexAlumno(existingAlumno);
+        this.addPendingSyncAlumnoId(existingAlumno.id_alumno);
         actualizados++;
       } else {
         const newStudent: Alumno = {
@@ -2369,6 +2377,7 @@ export class StorageService {
 
         currentAlumnos.push(newStudent);
         indexAlumno(newStudent);
+        this.addPendingSyncAlumnoId(newStudent.id_alumno);
         nuevos++;
       }
     }
