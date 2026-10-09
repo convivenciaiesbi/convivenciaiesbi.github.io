@@ -13,8 +13,11 @@ export function crearServidor(codigo: string, archivoInicial?: any, opciones?: {
   const archivos = drive.archivos;
   if (archivoInicial) { archivos['DB'] = JSON.stringify(archivoInicial); drive.fechas['DB'] = drive.reloj++; }
   const clave = (n: string) => (n === ARCHIVO_DB_DRIVE ? 'DB' : n);
+  // Varios archivos con el nombre principal: 'DB', 'DB#2', 'DB#3'...
+  const delPrincipal = () => Object.keys(archivos).filter(k => k === 'DB' || k.startsWith('DB#'));
   const archivo = (k: string) => ({
     getId: () => 'id-' + k,
+    setName: (n: string) => { archivos[n] = archivos[k]; drive.fechas[n] = drive.fechas[k]; delete archivos[k]; delete drive.fechas[k]; k = n; },
     getBlob: () => ({ getDataAsString: () => archivos[k] }),
     setContent: (t: string) => { archivos[k] = t; drive.fechas[k] = drive.reloj++; },
     getLastUpdated: () => new Date(drive.fechas[k] || 0),
@@ -40,8 +43,8 @@ export function crearServidor(codigo: string, archivoInicial?: any, opciones?: {
     DriveApp: {
       getFileById: (id: string) => { const k = id.replace(/^id-/, ''); if (archivos[k] === undefined) throw new Error('No existe'); return archivo(k); },
       getFolderById: () => ({
-        getFilesByName: (n: string) => { const k = clave(n); const l = archivos[k] !== undefined ? [archivo(k)] : []; let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
-        createFile: (n: string, t: string) => { const k = clave(n); archivos[k] = t; drive.fechas[k] = drive.reloj++; return archivo(k); } }) },
+        getFilesByName: (n: string) => { const k = clave(n); const ks = k === 'DB' ? delPrincipal() : (archivos[k] !== undefined ? [k] : []); const l = ks.map(archivo); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
+        createFile: (n: string, t: string) => { let k = clave(n); if (k === 'DB' && archivos['DB'] !== undefined) k = 'DB#' + (delPrincipal().length + 1); archivos[k] = t; drive.fechas[k] = drive.reloj++; return archivo(k); } }) },
     Logger: { log: () => {} },
   };
   vm.createContext(ctx); vm.runInContext(codigo, ctx);

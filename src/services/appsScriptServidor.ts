@@ -41,7 +41,12 @@ var DURACION_SESION_SEG = 21600;   // 6 horas (máximo de CacheService), se renu
 var MAX_INTENTOS = 5;
 var BLOQUEO_SEG = 900;             // 15 minutos
 var ITERACIONES_HASH_V1 = 400;   // solo para comprobar claves guardadas con la primera versión del servidor
-var TROZO_CACHE = 90000;
+var TROZO_CACHE = 45000;           // caracteres por trozo (límite de 100 KB por valor, con tildes)
+// En PRUEBAS se puede crear la base de datos si no existe; en PRODUCCIÓN nunca (si no se encuentra
+// el archivo es que algo va mal, y crear uno vacío haría creer que se han perdido los datos)
+var PERMITIR_BD_NUEVA = __PERMITIR_BD_NUEVA__;
+// Archivos leídos en esta ejecución (para la migración: duplicados con el mismo nombre)
+var ARCHIVOS_LEIDOS = [];
 
 // ------------------------------------------------------------------ Emergencia (solo desde el editor)
 
@@ -55,6 +60,7 @@ function restablecerClaveAdministrador() {
   asegurarMigracion();
   var email = norm(ADMIN_INICIAL);
   propiedades().deleteProperty('CLAVE_' + email);
+  invalidarSesiones(email);
   CacheService.getScriptCache().remove('FALLOS_' + email);
   var db = leerDb();
   if (claveAntigua(db, email)) {
@@ -177,9 +183,9 @@ function fechaArchivo(f) {
  * (como mucho cada 15 s, o siempre si "forzar"), por si alguien lo ha cambiado por fuera de este
  * servidor (otra versión de la app, una restauración manual...). Así nunca se pisa un cambio externo.
  */
-function cacheVigente(forzar) {
+function cacheVigente() {
   var cache = CacheService.getScriptCache();
-  if (!forzar && cache.get('DB2_VERIF')) return true;
+  if (cache.get('DB2_VERIF')) return true;
   var marca = cache.get('DB2_FECHA');
   var f = archivoDb();
   if (!f || !marca) return false;
@@ -195,37 +201,81 @@ function anotarFechaCache(f) {
   cache.put('DB2_VERIF', '1', 15);
 }
 
-function leerDb(forzarComprobacion) {
-  var texto = cacheVigente(!!forzarComprobacion) ? cacheLeer() : null;
-  if (texto) return JSON.parse(texto);
+function leerDb(forzarLectura) {
+  // Lecturas normales: copia en caché si sigue siendo la del archivo. Guardados (con el bloqueo
+  // puesto): siempre del archivo, para no partir nunca de una copia antigua.
+  if (!forzarLectura && cacheVigente()) {
+    var texto = cacheLeer();
+    if (texto) return JSON.parse(texto);
+  }
+  // La fecha se toma ANTES de leer el contenido: si alguien guarda entre medias, la fecha anotada
+  // será la antigua y la siguiente comprobación volverá a leer el archivo.
+  var f = archivoDb();
+  var fecha = f ? fechaArchivo(f) : '';
   var db = leerDbDeDrive();
   cacheGuardar(JSON.stringify(db));
-  anotarFechaCache(archivoDb());
+  var cache = CacheService.getScriptCache();
+  if (fecha) {
+    cache.put('DB2_FECHA', fecha, 1800);
+    cache.put('DB2_VERIF', '1', 15);
+  } else {
+    cache.remove('DB2_FECHA');
+  }
   return db;
+}
+
+/**
+ * Interpreta el contenido del archivo de datos. Admite los formatos que guardaba la versión 1
+ * ("data=..." y "%7B..."). Si no se entiende, se DETIENE todo: nunca se sigue con una base vacía.
+ */
+function decodificarDb(contenido) {
+  var t = String(contenido || '').trim();
+  var d = null;
+  try {
+    if (t.indexOf('data=') === 0) d = JSON.parse(decodeURIComponent(t.substring(5).replace(/\+/g, ' ')));
+    else if (t.indexOf('%7B') === 0 || t.indexOf('%7b') === 0) d = JSON.parse(decodeURIComponent(t.replace(/\+/g, ' ')));
+    else d = JSON.parse(t);
+  } catch (e) {
+    d = null;
+  }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) {
+    fallo('BD_ILEGIBLE', 'No se puede leer el archivo de datos de Drive. No se ha modificado nada. Avise al administrador.');
+  }
+  return asegurarListas(d);
 }
 
 /** Lee el archivo de Drive sin usar la caché (si hay varios con el mismo nombre, une su contenido). */
 function leerDbDeDrive(sinFiltrarBorrados) {
   var archivos = DriveApp.getFolderById(CARPETA_ID).getFilesByName(ARCHIVO_DB);
-  var db = null;
+  var lista = [];
   while (archivos.hasNext()) {
-    var contenido = archivos.next().getBlob().getDataAsString();
-    try {
-      var d = JSON.parse(contenido);
-      if (d && typeof d === 'object') {
-        if (!db) { db = asegurarListas(d); continue; }
-        // Varios archivos con el mismo nombre: unir su contenido
-        asegurarListas(d);
-        ['sanciones', 'alumnos', 'compensaciones'].forEach(function (k) {
-          var idk = k === 'sanciones' ? 'id_sancion' : (k === 'alumnos' ? 'id_alumno' : 'id_compensacion');
-          var vistos = {};
-          db[k].forEach(function (x) { if (x) vistos[x[idk]] = true; });
-          d[k].forEach(function (x) { if (x && x[idk] && !vistos[x[idk]]) db[k].push(x); });
-        });
-      }
-    } catch (err) {}
+    var f = archivos.next();
+    lista.push({ f: f, d: decodificarDb(f.getBlob().getDataAsString()) });
   }
-  if (!db) db = vacia();
+  ARCHIVOS_LEIDOS = lista.map(function (x) { return x.f; });
+  if (!lista.length) {
+    if (!PERMITIR_BD_NUEVA) {
+      fallo('BD_NO_ENCONTRADA', 'No se encuentra el archivo de datos en la carpeta de Drive. No se ha modificado nada. Avise al administrador.');
+    }
+    return vacia();
+  }
+  // Como la versión 1: la base es el archivo con más partes; del resto se añade lo que falte
+  lista.sort(function (a, b) { return b.d.sanciones.length - a.d.sanciones.length; });
+  var db = lista[0].d;
+  CacheService.getScriptCache().put('DB2_ID', lista[0].f.getId(), 21600);
+  for (var i = 1; i < lista.length; i++) {
+    var d = lista[i].d;
+    [['sanciones', 'id_sancion'], ['alumnos', 'id_alumno'], ['compensaciones', 'id_compensacion'],
+     ['expedientes_sancion', 'id_expediente'], ['profesores', 'email']].forEach(function (par) {
+      var k = par[0], idk = par[1];
+      var vistos = {};
+      db[k].forEach(function (x) { if (x && x[idk]) vistos[norm(x[idk])] = true; });
+      d[k].forEach(function (x) { if (x && x[idk] && !vistos[norm(x[idk])]) { db[k].push(x); vistos[norm(x[idk])] = true; } });
+    });
+    ['deleted_sanciones', 'deleted_alumnos', 'deleted_profesores', 'deleted_expedientes'].forEach(function (k) {
+      db[k] = unirTombstones(db[k], d[k]);
+    });
+  }
   if (sinFiltrarBorrados) return db;
   var borradas = {};
   db.deleted_sanciones.forEach(function (id) { borradas[id] = true; });
@@ -264,6 +314,9 @@ function asegurarMigracion() {
     var archivos = carpeta.getFilesByName(ARCHIVO_DB);
     var originales = [];
     while (archivos.hasNext()) originales.push(archivos.next().getBlob().getDataAsString());
+    if (!originales.length && !PERMITIR_BD_NUEVA) {
+      fallo('BD_NO_ENCONTRADA', 'No se encuentra el archivo de datos en la carpeta de Drive. No se ha modificado nada. Avise al administrador.');
+    }
     if (originales.length) {
       var db = leerDbDeDrive(true);
       if (!db.migracion_v2) {
@@ -289,7 +342,14 @@ function asegurarMigracion() {
         });
         db.saldos_antes_v2 = { fecha: ahora.toISOString(), saldos: saldos };
         db.migracion_v2 = { fecha: ahora.toISOString(), copias: copias, partes_marcados_borrados: borradosPresentes };
+        var duplicados = ARCHIVOS_LEIDOS.slice();
         escribirDb(db);
+        // Si había varios archivos con el mismo nombre, su contenido ya está unido en el principal
+        // (y todos tienen copia de seguridad): se renombran para que no se vuelvan a leer
+        var principal = archivoDb();
+        duplicados.forEach(function (f) {
+          if (principal && f.getId() !== principal.getId()) f.setName('DUPLICADO_ANTIGUO_' + sello + '_' + ARCHIVO_DB);
+        });
       }
     }
     props.setProperty('MIGRACION_V2', new Date().toISOString());
@@ -440,9 +500,19 @@ function validarComplejidad(clave) {
 
 // ------------------------------------------------------------------ Sesiones
 
+// Al restablecer una contraseña se cambia la "generación" de sesiones de esa cuenta:
+// las sesiones abiertas antes dejan de valer
+function generacionSesiones(email) {
+  return propiedades().getProperty('GEN_' + norm(email)) || '0';
+}
+
+function invalidarSesiones(email) {
+  propiedades().setProperty('GEN_' + norm(email), String(new Date().getTime()));
+}
+
 function crearSesion(email) {
   var token = Utilities.getUuid() + Utilities.getUuid();
-  CacheService.getScriptCache().put('SES_' + token, norm(email), DURACION_SESION_SEG);
+  CacheService.getScriptCache().put('SES_' + token, norm(email) + '|' + generacionSesiones(email), DURACION_SESION_SEG);
   return token;
 }
 
@@ -453,11 +523,17 @@ function cerrarSesion(token) {
 function sesion(token, db) {
   if (!token) fallo('NO_AUTH', 'Debe iniciar sesión.');
   var cache = CacheService.getScriptCache();
-  var email = cache.get('SES_' + token);
-  if (!email) fallo('NO_AUTH', 'La sesión ha caducado. Vuelva a iniciar sesión.');
+  var valor = cache.get('SES_' + token);
+  if (!valor) fallo('NO_AUTH', 'La sesión ha caducado. Vuelva a iniciar sesión.');
+  var partes = String(valor).split('|');
+  var email = partes[0];
+  if (partes.length > 1 && partes[1] !== generacionSesiones(email)) {
+    cerrarSesion(token);
+    fallo('NO_AUTH', 'Su contraseña se ha restablecido. Vuelva a iniciar sesión.');
+  }
   var p = buscarProfesor(db, email);
   if (!p || p.estado === 'INACTIVO') { cerrarSesion(token); fallo('NO_AUTH', 'Su cuenta ya no tiene acceso.'); }
-  cache.put('SES_' + token, email, DURACION_SESION_SEG);
+  cache.put('SES_' + token, valor, DURACION_SESION_SEG);
   return { email: norm(email), prof: p, admin: esAdmin(p) };
 }
 
@@ -552,6 +628,7 @@ function restablecerClaveBloqueado(req) {
   if (!s.admin) fallo('PROHIBIDO', 'Solo Jefatura o Convivencia pueden restablecer contraseñas.');
   var email = norm(req.email);
   propiedades().deleteProperty('CLAVE_' + email);
+  invalidarSesiones(email);
   CacheService.getScriptCache().remove('FALLOS_' + email);
   if (claveAntigua(db, email)) {
     borrarClaveAntigua(db, email);
@@ -600,7 +677,7 @@ function soloCampos(obj, campos) {
 }
 
 function esAutor(s, prof) {
-  return !!s && !!prof && (s.id_profesor === prof.id_profesor);
+  return !!s && !!prof && !!prof.id_profesor && !!s.id_profesor && (s.id_profesor === prof.id_profesor);
 }
 
 // Datos de cada alumno/a que recibe cualquier docente (los de su tutoría los recibe completos)
@@ -749,14 +826,20 @@ function fusionAdmin(actual, entrada) {
   r.deleted_profesores = unirTombstones(actual.deleted_profesores, entrada.deleted_profesores);
 
   var activasEntrada = {};
-  r.sanciones.forEach(function (x) { if (x && x.id_sancion) activasEntrada[x.id_sancion] = true; });
+  r.sanciones.forEach(function (x) {
+    // Un parte que llega activo deja de estar borrado solo si este dispositivo lo ha recuperado
+    // (si no, sería una copia antigua de un parte que otro acaba de borrar)
+    if (x && x.id_sancion && (!cambiosSanciones || cambiosSanciones[x.id_sancion])) activasEntrada[x.id_sancion] = true;
+  });
   // Un parte que llega activo no se considera borrado (restaurado)
   r.deleted_sanciones = r.deleted_sanciones.filter(function (id) { return !activasEntrada[id]; });
   var borradas = {};
   r.deleted_sanciones.forEach(function (id) { borradas[id] = true; });
   r.sanciones = r.sanciones.filter(function (x) { return x && x.id_sancion && !borradas[x.id_sancion]; });
+  var enEntrada = {};
+  r.sanciones.forEach(function (x) { enEntrada[x.id_sancion] = true; });
   actual.sanciones.forEach(function (x) {
-    if (x && x.id_sancion && !activasEntrada[x.id_sancion] && !borradas[x.id_sancion]) r.sanciones.push(x);
+    if (x && x.id_sancion && !enEntrada[x.id_sancion] && !borradas[x.id_sancion]) r.sanciones.push(x);
   });
 
   var comps = {};
@@ -904,5 +987,6 @@ export function generarServidorAppsScript(): string {
     .split('__CARPETA_ID__').join(CARPETA_DRIVE_ID)
     .split('__ARCHIVO_DB__').join(ARCHIVO_DB_DRIVE)
     .split('__ADMIN_INICIAL__').join(ADMIN_INICIAL)
-    .split('__ENTORNO__').join(ES_ENTORNO_PRUEBAS ? 'PRUEBAS (datos ficticios)' : 'PRODUCCIÓN');
+    .split('__ENTORNO__').join(ES_ENTORNO_PRUEBAS ? 'PRUEBAS (datos ficticios)' : 'PRODUCCIÓN')
+    .split('__PERMITIR_BD_NUEVA__').join(ES_ENTORNO_PRUEBAS ? 'true' : 'false');
 }

@@ -6,7 +6,7 @@
 import { Alumno, Profesor, Sancion, Compensacion, AuditLog, ExpedienteSancion } from '../types/convivencia';
 import { StorageService } from './storageService';
 import { AuthService } from './authService';
-import { URL_API_DRIVE, ES_ENTORNO_PRUEBAS, CARPETA_DRIVE_ID } from '../config/entorno';
+import { URL_API_DRIVE, CARPETA_DRIVE_ID } from '../config/entorno';
 import { llamarApi } from './apiService';
 import { guardarCola, restaurarCola } from './colaPendiente';
 
@@ -73,35 +73,22 @@ export class GoogleDriveSyncService {
    * Obtiene la URL configurada del Web App de Google Apps Script vinculado al Drive del centro.
    */
   static getSyncApiUrl(): string {
-    // En el entorno de pruebas se ignora cualquier URL guardada en el navegador,
-    // para que nunca se pueda escribir por error en la base de datos real.
-    if (ES_ENTORNO_PRUEBAS) {
-      return URL_API_DRIVE;
+    // Siempre la dirección configurada para el entorno (src/config/entorno.ts). Se ignora cualquier
+    // dirección guardada en el navegador por versiones anteriores: podría apuntar a un servidor antiguo.
+    try {
+      localStorage.removeItem(SYNC_URL_STORAGE_KEY);
+    } catch {
+      /* sin almacenamiento */
     }
-    const custom = localStorage.getItem(SYNC_URL_STORAGE_KEY);
-    // Si hay una URL personalizada guardada que sea una URL antigua o vacía, migrar a la nueva oficial
-    if (custom && custom.includes('AKfycbzIG544uJnAwpFOVCOb2FeCuFpx1MzZU3nLWY9n-ygLNqzycDqeze5tPX8EHE9pFaEePg')) {
-      localStorage.setItem(SYNC_URL_STORAGE_KEY, DEFAULT_OFFICIAL_DRIVE_API_URL);
-      return DEFAULT_OFFICIAL_DRIVE_API_URL;
-    }
-    const raw = (custom && custom.trim().length > 0) ? custom.trim() : DEFAULT_OFFICIAL_DRIVE_API_URL;
-    // Si la URL contiene el prefijo de dominio corporativo /a/macros/... normalizar a /macros/
-    return raw.replace(/\/a\/macros\/[^/]+\//, '/macros/');
+    return URL_API_DRIVE;
   }
 
-  /**
-   * Guarda o actualiza la URL del endpoint de Google Apps Script.
-   */
-  static setSyncApiUrl(url: string): void {
-    let cleanUrl = url.trim();
-    // Limpiar espacios, comillas o parámetros residuales
-    cleanUrl = cleanUrl.replace(/^["']|["']$/g, '');
-    if (cleanUrl) {
-      // Normalizar URL interna de dominio institucional a formato canónico de Web App
-      cleanUrl = cleanUrl.replace(/\/a\/macros\/[^/]+\//, '/macros/');
-      localStorage.setItem(SYNC_URL_STORAGE_KEY, cleanUrl);
-    } else {
+  /** Ya no se puede cambiar la dirección del servidor desde la app (se fija en src/config/entorno.ts). */
+  static setSyncApiUrl(_url: string): void {
+    try {
       localStorage.removeItem(SYNC_URL_STORAGE_KEY);
+    } catch {
+      /* sin almacenamiento */
     }
   }
 

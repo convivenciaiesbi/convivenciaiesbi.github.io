@@ -519,6 +519,8 @@ export const DriveAuditModal: React.FC<DriveAuditModalProps> = ({
             <input
               type="url"
               value={syncApiUrl}
+              readOnly
+              title="La dirección del servidor se fija en la configuración de la app"
               onChange={(e) => setSyncApiUrl(e.target.value)}
               placeholder="https://script.google.com/macros/s/.../exec"
               className="flex-1 min-w-[240px] px-3 py-1.5 text-xs font-mono rounded-xl border border-slate-300 bg-white focus:border-sky-600 focus:outline-none"

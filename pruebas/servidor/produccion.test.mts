@@ -217,4 +217,56 @@ srv.post({ accion: 'guardar', token: tAdmin, data: vb });
 const tras = srv.post({ accion: 'leer', token: tA1 });
 ok('al dar de baja a una docente, su sesión abierta deja de funcionar', !tras.ok && tras.codigo === 'NO_AUTH');
 
+console.log('== 7. Protecciones del archivo de datos');
+{
+  // Varios archivos con el mismo nombre (pasaba con la v1): se unen y los duplicados se renombran
+  const a1 = JSON.parse(textoOriginal);
+  const a2 = JSON.parse(textoOriginal);
+  a2.sanciones = [{ id_sancion: 's-dup', id_alumno: 'al-1', id_profesor: 'prof-a1', puntos_restados: 1, fecha: '2026-09-20' }];
+  a2.profesores = [{ id_profesor: 'prof-solo2', email: 'solo.en.duplicado@g.educaand.es', nombre: 'Solo', apellidos: 'Dup', rol: 'ROLE_DOCENTE', estado: 'ACTIVO' }];
+  const s3 = crearServidor(generarServidorAppsScript(), a1);
+  s3.archivos['DB#2'] = JSON.stringify(a2); s3.drive.fechas['DB#2'] = 99;
+  s3.post({ accion: 'estadoCuenta', email: ADMIN });
+  const princ = JSON.parse(s3.archivos['DB']);
+  ok('duplicados: el principal tiene los partes de los dos', princ.sanciones.some((x: any) => x.id_sancion === 's-dup') && princ.sanciones.length === 3);
+  ok('duplicados: y el docente que solo estaba en el otro', princ.profesores.some((x: any) => x.email === 'solo.en.duplicado@g.educaand.es'));
+  ok('duplicados: copia de seguridad de cada archivo', Object.keys(s3.archivos).filter(k => k.startsWith('COPIA_SEGURIDAD')).length === 2);
+  ok('duplicados: el otro se renombra y ya no se vuelve a leer', !s3.archivos['DB#2'] && Object.keys(s3.archivos).some(k => k.startsWith('DUPLICADO_ANTIGUO_')));
+}
+{
+  // Archivo con el formato "data=..." de la v1
+  const s4 = crearServidor(generarServidorAppsScript());
+  s4.archivos['DB'] = 'data=' + encodeURIComponent(textoOriginal).replace(/%20/g, '+'); s4.drive.fechas['DB'] = 1;
+  s4.post({ accion: 'estadoCuenta', email: ADMIN });
+  ok('archivo en formato "data=" de la v1: se lee completo', JSON.parse(s4.archivos['DB']).sanciones.length === 2);
+}
+{
+  // Archivo dañado: no se toca nada y no se da la migración por hecha
+  const s5 = crearServidor(generarServidorAppsScript());
+  s5.archivos['DB'] = '{"profesores": [ esto no es json'; s5.drive.fechas['DB'] = 1;
+  const r5 = s5.post({ accion: 'estadoCuenta', email: ADMIN });
+  ok('archivo dañado: error claro', !r5.ok && r5.codigo === 'BD_ILEGIBLE');
+  ok('...sin modificar el archivo ni crear otro', s5.archivos['DB'] === '{"profesores": [ esto no es json' && Object.keys(s5.archivos).length === 1);
+  ok('...y sin dar la migración por hecha', !s5.props.get('MIGRACION_V2'));
+}
+{
+  // Producción: si no se encuentra el archivo, nunca se crea uno vacío
+  const codProd = generarServidorAppsScript().replace('var PERMITIR_BD_NUEVA = true;', 'var PERMITIR_BD_NUEVA = false;');
+  ok('el código generado lleva el ajuste esperado', codProd.includes('var PERMITIR_BD_NUEVA = false;'));
+  const s6 = crearServidor(codProd);
+  const r6 = s6.post({ accion: 'login', email: ADMIN, clave: 'cualquiera1' });
+  ok('producción sin archivo de datos: error y nada creado', !r6.ok && r6.codigo === 'BD_NO_ENCONTRADA' && Object.keys(s6.archivos).length === 0);
+}
+{
+  // Restablecer una contraseña cierra las sesiones abiertas de esa cuenta
+  const tSP = login(AMBOS, 'nueva22').token || srv2.post({ accion: 'login', email: AMBOS, clave: 'vieja22' }).token;
+  const sv = tSP && srv.post({ accion: 'leer', token: tSP }).ok ? srv : srv2;
+  const tok = sv === srv ? tSP : srv2.post({ accion: 'login', email: AMBOS, clave: 'vieja22' }).token;
+  const tAd = sv.post({ accion: 'login', email: ADMIN, clave: 'admin123' }).token;
+  ok('sesión abierta antes del restablecimiento', sv.post({ accion: 'leer', token: tok }).ok);
+  sv.post({ accion: 'restablecerClave', token: tAd, email: AMBOS });
+  const r7 = sv.post({ accion: 'leer', token: tok });
+  ok('tras restablecer su contraseña, esa sesión deja de valer', !r7.ok && r7.codigo === 'NO_AUTH');
+}
+
 console.log(fallos ? `\n${fallos} FALLOS` : '\nTodo correcto');
