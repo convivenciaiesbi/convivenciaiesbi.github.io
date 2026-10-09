@@ -222,6 +222,10 @@ export class GoogleDriveSyncService {
 
       // Solo mantener tombstones que estén en el servidor o que acaben de ser eliminados en esta sesión
       const allDeletedSanciones = new Set<string>([...remoteDeletedSanciones, ...localDeletedSanciones]);
+      // Partes borrados que Jefatura acaba de recuperar y aún no ha confirmado el servidor
+      StorageService.getSancionesRecuperadas().forEach(id => {
+        if (pendingSyncSancionIds.has(id)) allDeletedSanciones.delete(id);
+      });
 
       // Si vienen sanciones en remoteData.sanciones y NO acaban de ser eliminadas en esta sesión, son ACTIVAS en Drive
       if (remoteData.sanciones && Array.isArray(remoteData.sanciones)) {
@@ -369,6 +373,10 @@ export class GoogleDriveSyncService {
         StorageService.depurarAlumnosDuplicados('SISTEMA_SYNC');
       }
 
+      // Informe del paso a la versión 2 (solo lo recibe Jefatura/Convivencia)
+      StorageService.setSaldosAntesV2(remoteData.saldos_antes_v2);
+      StorageService.setInformeMigracionV2(remoteData.migracion_v2);
+
       // 6. Recálculo automático estricto de puntos de carnet tras sincronizar sanciones y compensaciones
       StorageService.recalcularPuntosAlumnos();
       StorageService.markLoadedFromDrive();
@@ -468,10 +476,20 @@ export class GoogleDriveSyncService {
     const sentAlumnoIds = StorageService.getPendingSyncAlumnoIds();
     const sentCompIds = StorageService.getPendingSyncCompensacionIds();
     const sentExpIds = StorageService.getPendingSyncExpedienteIds();
+    const sentProfEmails = StorageService.getPendingSyncProfesorEmails();
+    // Lista de lo que este dispositivo ha cambiado: del resto, el servidor conserva su versión
+    // (así unos datos con unos segundos de antigüedad no deshacen lo que otro acaba de guardar)
+    (payload as any).cambios = {
+      sanciones: sentSancionIds,
+      alumnos: sentAlumnoIds,
+      profesores: sentProfEmails,
+      compensaciones: sentCompIds,
+      expedientes: sentExpIds,
+    };
     const markSent = () => {
       this.pushEpoch++;
       StorageService.clearPendingSyncSancionIds(sentSancionIds.length ? sentSancionIds : ['__ninguno__']);
-      StorageService.clearPendingSyncProfesorEmails();
+      StorageService.clearPendingSyncProfesorEmails(sentProfEmails);
       StorageService.clearPendingSyncAlumnoIds(sentAlumnoIds);
       StorageService.clearPendingSyncCompensacionIds(sentCompIds);
       StorageService.clearPendingSyncExpedienteIds(sentExpIds);

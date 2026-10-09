@@ -71,6 +71,11 @@ let memoryPendingSyncCompensaciones: string[] = [];
 let memoryExpedientes: ExpedienteSancion[] = [];
 let memoryDeletedExpedientes: string[] = [];
 let memoryPendingSyncExpedientes: string[] = [];
+// Saldos que el alumnado tenía en la versión anterior de la app (los anota el servidor al actualizarse)
+let memorySaldosAntesV2: { fecha: string; saldos: Record<string, number> } | null = null;
+let memoryPartesMarcadosBorradosV2: Sancion[] = [];
+// Partes borrados que Jefatura ha decidido recuperar en esta sesión (prevalecen sobre el borrado del servidor)
+let memorySancionesRecuperadas: string[] = [];
 let memoryLastWriteTimestamp: string | null = null;
 let memoryHasLoadedFromDrive: boolean = false;
 
@@ -186,6 +191,9 @@ export class StorageService {
     memoryExpedientes = [];
     memoryDeletedExpedientes = [];
     memoryPendingSyncExpedientes = [];
+    memorySaldosAntesV2 = null;
+    memoryPartesMarcadosBorradosV2 = [];
+    memorySancionesRecuperadas = [];
     memoryHasLoadedFromDrive = false;
   }
 
@@ -287,6 +295,10 @@ export class StorageService {
         // Criterio 1: Mismo NIE oficial de Séneca
         if (hasRealNie && bHasRealNie && aNie === bNie) {
           isDuplicate = true;
+        }
+        // Dos NIE oficiales distintos son dos personas distintas aunque se llamen igual
+        else if (hasRealNie && bHasRealNie && aNie !== bNie) {
+          isDuplicate = false;
         }
         // Criterio 2: Mismo nombre canónico normalizado (apellidos + nombre sin tildes ni espacios extra)
         else if (aCanonical && bCanonical && aCanonical === bCanonical) {
@@ -514,7 +526,8 @@ export class StorageService {
     alumnos.splice(idx, 1);
     this.saveAlumnos(alumnos);
 
-    // Eliminar también las posibles sanciones vinculadas a este alumno
+    // Eliminar también las posibles sanciones vinculadas a este alumno (y que no reaparezcan)
+    this.getSanciones().forEach(s => { if (s.id_alumno === idAlumno) this.addDeletedSancionId(s.id_sancion); });
     const sanciones = this.getSanciones().filter(s => s.id_alumno !== idAlumno);
     this.saveSanciones(sanciones);
 
@@ -1084,6 +1097,11 @@ export class StorageService {
 
     const updatedList = Array.from(profMap.values());
     this.saveProfesores(updatedList);
+    // Marcar como pendientes de subir (si no, la siguiente descarga los descartaría)
+    filas.forEach((f: any) => {
+      const em = (f?.email || '').toLowerCase().trim();
+      if (em && profMap.has(em)) this.addPendingSyncProfesorEmail(em);
+    });
 
     this.addAuditLog(
       usuarioEmail,
@@ -1241,7 +1259,12 @@ export class StorageService {
     }
   }
 
-  static clearPendingSyncProfesorEmails(): void {
+  static clearPendingSyncProfesorEmails(emails?: string[]): void {
+    if (emails) {
+      const quitar = new Set(emails.map(e => e.toLowerCase().trim()));
+      memoryPendingSyncProfesores = memoryPendingSyncProfesores.filter(e => !quitar.has(e));
+      return;
+    }
     memoryPendingSyncProfesores = [];
   }
 
@@ -1338,6 +1361,45 @@ export class StorageService {
 
   static saveDeletedExpedienteIds(ids: string[]): void {
     memoryDeletedExpedientes = Array.from(new Set(ids));
+  }
+
+  static getSaldosAntesV2(): { fecha: string; saldos: Record<string, number> } | null {
+    return memorySaldosAntesV2;
+  }
+
+  /** Partes que la versión anterior tenía marcados como borrados pero seguían en el archivo. */
+  static getPartesMarcadosBorradosV2(): Sancion[] {
+    return memoryPartesMarcadosBorradosV2;
+  }
+
+  static setInformeMigracionV2(v: any): void {
+    memoryPartesMarcadosBorradosV2 = v && Array.isArray(v.partes_marcados_borrados)
+      ? v.partes_marcados_borrados.filter((x: any) => x && x.id_sancion)
+      : [];
+  }
+
+  static getSancionesRecuperadas(): string[] {
+    return [...memorySancionesRecuperadas];
+  }
+
+  /** Jefatura decide recuperar uno de esos partes: vuelve a estar activo en todos los dispositivos. */
+  static recuperarParteMarcadoBorrado(idSancion: string, usuarioEmail: string): boolean {
+    const parte = memoryPartesMarcadosBorradosV2.find(s => s.id_sancion === idSancion);
+    if (!parte || this.getSanciones().some(s => s.id_sancion === idSancion)) return false;
+    this.removeDeletedSancionId(idSancion);
+    if (!memorySancionesRecuperadas.includes(idSancion)) memorySancionesRecuperadas.push(idSancion);
+    this.saveSanciones([...this.getSanciones(), { ...parte }]);
+    this.addPendingSyncSancionId(idSancion);
+    this.recalcularPuntosAlumnos(parte.id_alumno);
+    this.addAuditLog(usuarioEmail, 'ACTUALIZACION_SISTEMA', 'Parte/' + idSancion,
+      `Parte recuperado tras la actualización de la app (estaba marcado como borrado en la versión anterior): expediente ${parte.numero_expediente || ''}`);
+    return true;
+  }
+
+  static setSaldosAntesV2(v: any): void {
+    memorySaldosAntesV2 = v && typeof v === 'object' && v.saldos && typeof v.saldos === 'object'
+      ? { fecha: String(v.fecha || ''), saldos: v.saldos }
+      : null;
   }
 
   static getPendingSyncExpedienteIds(): string[] {

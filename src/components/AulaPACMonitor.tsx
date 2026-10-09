@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { hoyLocal } from '../services/carnetPuntos';
 import React, { useState, useMemo } from 'react';
 import { 
   BookOpen, 
@@ -35,7 +36,7 @@ export const AulaPACMonitor: React.FC<AulaPACMonitorProps> = ({
   currentUser,
   onUpdatePACStatus,
 }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = hoyLocal();
   const [filterOnlyActive, setFilterOnlyActive] = useState<boolean>(true);
 
   // Map of Alumnos

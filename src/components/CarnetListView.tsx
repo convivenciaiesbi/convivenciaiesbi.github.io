@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { hoyLocal } from '../services/carnetPuntos';
 import { 
   Search, 
   PlusCircle, 
@@ -160,7 +161,7 @@ export const CarnetListView: React.FC<CarnetListViewProps> = ({
     }
   }, [alumnos, historyModalAlumno]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = hoyLocal();
 
   // Conteo de activos y bajas
   const countActivos = useMemo(() => alumnos.filter(a => a.estado !== 'BAJA').length, [alumnos]);

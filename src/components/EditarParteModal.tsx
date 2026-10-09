@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { hoyLocal } from '../services/carnetPuntos';
 import { 
   Pencil, 
   X, 
@@ -95,7 +96,7 @@ export const EditarParteModal: React.FC<EditarParteModalProps> = ({
   const [puntosRestadosInput, setPuntosRestadosInput] = useState<number>(sancion.puntos_restados);
 
   // 4. Hechos y Detalles
-  const [fecha, setFecha] = useState<string>(sancion.fecha || new Date().toISOString().split('T')[0]);
+  const [fecha, setFecha] = useState<string>(sancion.fecha || hoyLocal());
   const [horaIncidente, setHoraIncidente] = useState<string>(sancion.hora_incidente || '09:00');
   const [tramoHorario, setTramoHorario] = useState<TramoHorario>(sancion.tramo_horario || '1ª Hora (08:30 - 09:30)');
   const [ubicacion, setUbicacion] = useState<UbicacionCentro>(sancion.ubicacion || 'Aula ordinaria');

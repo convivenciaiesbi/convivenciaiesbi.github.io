@@ -77,6 +77,7 @@ import {
 } from 'lucide-react';
 import { EntornoBanner } from './components/EntornoBanner';
 import { AvisoGuardado } from './components/AvisoGuardado';
+import { InformeCambioVersion } from './components/InformeCambioVersion';
 import { TutoriaView } from './components/TutoriaView';
 import { SancionesView } from './components/SancionesView';
 import { EVENTO_SESION_CADUCADA } from './services/apiService';
@@ -444,6 +445,7 @@ export default function App() {
     <div className="min-h-screen bg-gradient-to-br from-sky-50/40 via-slate-50 to-blue-50/30 flex flex-col text-slate-800 font-sans selection:bg-sky-200 selection:text-sky-900">
       <EntornoBanner />
       <AvisoGuardado />
+      {isAdmin && <InformeCambioVersion alumnos={alumnos} sanciones={sanciones} profesores={profesores} onCambio={refreshAllData} />}
       {/* Top Bar Header with pastel styling & role-based tabs */}
       <Header
         currentView={currentView}

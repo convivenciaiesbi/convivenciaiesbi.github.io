@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { hoyLocal } from '../services/carnetPuntos';
 import { 
   Filter, 
   Search, 
@@ -69,7 +70,7 @@ export const DailyFeedView: React.FC<DailyFeedViewProps> = ({
   onDeleteParte,
   onEditParte,
 }) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = hoyLocal();
   const isAdmin = AuthService.isAdmin(currentUser);
 
   // Filters - Default to '' (Todas las fechas) so all sanctions in the JSON are immediately visible

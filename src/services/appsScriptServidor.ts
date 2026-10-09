@@ -52,12 +52,13 @@ var TROZO_CACHE = 90000;
  * Solo puede ejecutarla quien tenga acceso a este proyecto de Apps Script.
  */
 function restablecerClaveAdministrador() {
+  asegurarMigracion();
   var email = norm(ADMIN_INICIAL);
   propiedades().deleteProperty('CLAVE_' + email);
   CacheService.getScriptCache().remove('FALLOS_' + email);
   var db = leerDb();
   if (claveAntigua(db, email)) {
-    for (var k in db.credenciales_profesores) { if (norm(k) === email) delete db.credenciales_profesores[k]; }
+    borrarClaveAntigua(db, email);
     escribirDb(db);
   }
   Logger.log('Contraseña de ' + email + ' restablecida. Fije una nueva en el próximo acceso a la app.');
@@ -77,6 +78,7 @@ function doPost(e) {
     return salida({ ok: false, error: 'Petición no válida.' });
   }
   try {
+    asegurarMigracion();
     switch (req.accion) {
       case 'estadoCuenta': return salida(estadoCuenta(req));
       case 'login': return salida(login(req));
@@ -152,10 +154,58 @@ function cacheGuardar(texto) {
   }
 }
 
-function leerDb() {
-  var texto = cacheLeer();
-  if (texto) return JSON.parse(texto);
+/** Archivo principal de datos (se recuerda su identificador para no buscarlo en cada petición). */
+function archivoDb() {
+  var cache = CacheService.getScriptCache();
+  var id = cache.get('DB2_ID');
+  if (id) {
+    try { return DriveApp.getFileById(id); } catch (e) { cache.remove('DB2_ID'); }
+  }
+  var archivos = DriveApp.getFolderById(CARPETA_ID).getFilesByName(ARCHIVO_DB);
+  if (!archivos.hasNext()) return null;
+  var f = archivos.next();
+  cache.put('DB2_ID', f.getId(), 21600);
+  return f;
+}
 
+function fechaArchivo(f) {
+  try { return String(DriveApp.getFileById(f.getId()).getLastUpdated().getTime()); } catch (e) { return ''; }
+}
+
+/**
+ * ¿Sigue valiendo la copia en caché? Se comprueba la fecha de modificación del archivo en Drive
+ * (como mucho cada 15 s, o siempre si "forzar"), por si alguien lo ha cambiado por fuera de este
+ * servidor (otra versión de la app, una restauración manual...). Así nunca se pisa un cambio externo.
+ */
+function cacheVigente(forzar) {
+  var cache = CacheService.getScriptCache();
+  if (!forzar && cache.get('DB2_VERIF')) return true;
+  var marca = cache.get('DB2_FECHA');
+  var f = archivoDb();
+  if (!f || !marca) return false;
+  if (fechaArchivo(f) !== marca) return false;
+  cache.put('DB2_VERIF', '1', 15);
+  return true;
+}
+
+function anotarFechaCache(f) {
+  if (!f) return;
+  var cache = CacheService.getScriptCache();
+  cache.put('DB2_FECHA', fechaArchivo(f), 1800);
+  cache.put('DB2_VERIF', '1', 15);
+}
+
+function leerDb(forzarComprobacion) {
+  var texto = cacheVigente(!!forzarComprobacion) ? cacheLeer() : null;
+  if (texto) return JSON.parse(texto);
+  var db = leerDbDeDrive();
+  cacheGuardar(JSON.stringify(db));
+  anotarFechaCache(archivoDb());
+  return db;
+}
+
+/** Lee el archivo de Drive sin usar la caché (si hay varios con el mismo nombre, une su contenido). */
+function leerDbDeDrive(sinFiltrarBorrados) {
   var archivos = DriveApp.getFolderById(CARPETA_ID).getFilesByName(ARCHIVO_DB);
   var db = null;
   while (archivos.hasNext()) {
@@ -176,10 +226,10 @@ function leerDb() {
     } catch (err) {}
   }
   if (!db) db = vacia();
+  if (sinFiltrarBorrados) return db;
   var borradas = {};
   db.deleted_sanciones.forEach(function (id) { borradas[id] = true; });
   db.sanciones = db.sanciones.filter(function (s) { return s && s.id_sancion && !borradas[s.id_sancion]; });
-  cacheGuardar(JSON.stringify(db));
   return db;
 }
 
@@ -188,11 +238,90 @@ function escribirDb(db) {
   (db.profesores || []).forEach(function (p) { delete p.password_hash; delete p.requiere_cambio_clave; });
   delete db.reset_credenciales_emails;
   var texto = JSON.stringify(db);
-  var carpeta = DriveApp.getFolderById(CARPETA_ID);
-  var archivos = carpeta.getFilesByName(ARCHIVO_DB);
-  if (archivos.hasNext()) archivos.next().setContent(texto);
-  else carpeta.createFile(ARCHIVO_DB, texto, MimeType.PLAIN_TEXT);
+  var f = archivoDb();
+  if (f) f.setContent(texto);
+  else f = DriveApp.getFolderById(CARPETA_ID).createFile(ARCHIVO_DB, texto, MimeType.PLAIN_TEXT);
   cacheGuardar(texto);
+  anotarFechaCache(f);
+}
+
+// ------------------------------------------------------------------ Paso de la versión 1 a la 2 (una sola vez)
+
+/**
+ * La primera vez que se usa este servidor:
+ *  1) guarda en la carpeta una COPIA DE SEGURIDAD exacta del archivo de datos;
+ *  2) pasa las contraseñas de la versión 1 a un único sitio, respetando los restablecimientos;
+ *  3) anota el saldo que cada alumno/a tenía en la versión 1 (para el informe de Jefatura).
+ */
+function asegurarMigracion() {
+  var props = propiedades();
+  if (props.getProperty('MIGRACION_V2')) return;
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (props.getProperty('MIGRACION_V2')) return;
+    var carpeta = DriveApp.getFolderById(CARPETA_ID);
+    var archivos = carpeta.getFilesByName(ARCHIVO_DB);
+    var originales = [];
+    while (archivos.hasNext()) originales.push(archivos.next().getBlob().getDataAsString());
+    if (originales.length) {
+      var db = leerDbDeDrive(true);
+      if (!db.migracion_v2) {
+        var ahora = new Date();
+        var sello = Utilities.formatDate(ahora, 'Europe/Madrid', 'yyyy-MM-dd_HH-mm');
+        var copias = [];
+        originales.forEach(function (texto, i) {
+          var nombre = 'COPIA_SEGURIDAD_ANTES_V2_' + sello + (i ? '_' + (i + 1) : '') + '.json';
+          carpeta.createFile(nombre, texto, MimeType.PLAIN_TEXT);
+          copias.push(nombre);
+        });
+        migrarClavesV1(db);
+        // Partes que la versión 1 marcó como borrados pero seguían en el archivo (por eso a veces
+        // aparecían y otras no). Siguen borrados; se guarda una copia para que Jefatura decida
+        // en el informe si recupera alguno.
+        var marcados = {};
+        db.deleted_sanciones.forEach(function (id) { marcados[id] = true; });
+        var borradosPresentes = db.sanciones.filter(function (x) { return x && marcados[x.id_sancion]; });
+        db.sanciones = db.sanciones.filter(function (x) { return x && x.id_sancion && !marcados[x.id_sancion]; });
+        var saldos = {};
+        db.alumnos.forEach(function (a) {
+          if (a && a.id_alumno) saldos[a.id_alumno] = Number(a.puntos_actuales);
+        });
+        db.saldos_antes_v2 = { fecha: ahora.toISOString(), saldos: saldos };
+        db.migracion_v2 = { fecha: ahora.toISOString(), copias: copias, partes_marcados_borrados: borradosPresentes };
+        escribirDb(db);
+      }
+    }
+    props.setProperty('MIGRACION_V2', new Date().toISOString());
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * La versión 1 guardaba el resumen de cada contraseña en dos sitios (credenciales_profesores y
+ * profesores[].password_hash) y marcaba los restablecimientos en reset_credenciales_emails o
+ * requiere_cambio_clave. Se unifica todo en credenciales_profesores; si los dos sitios no
+ * coinciden se aceptan ambos en el primer acceso (luego se guarda solo la contraseña nueva).
+ */
+function migrarClavesV1(db) {
+  var resets = {};
+  (db.reset_credenciales_emails || []).forEach(function (e) { resets[norm(e)] = true; });
+  var claves = {};
+  var origen = db.credenciales_profesores || {};
+  for (var k in origen) { if (origen[k] && !resets[norm(k)]) claves[norm(k)] = origen[k]; }
+  var alternativas = {};
+  (db.profesores || []).forEach(function (p) {
+    if (!p || !p.email) return;
+    var e = norm(p.email);
+    if (resets[e] || p.requiere_cambio_clave === true) { delete claves[e]; return; }
+    if (p.password_hash) {
+      if (!claves[e]) claves[e] = p.password_hash;
+      else if (claves[e] !== p.password_hash) alternativas[e] = p.password_hash;
+    }
+  });
+  db.credenciales_profesores = claves;
+  db.credenciales_v1_alternativas = alternativas;
 }
 
 // ------------------------------------------------------------------ Profesorado y claves
@@ -278,6 +407,19 @@ function claveAntigua(db, email) {
   return null;
 }
 
+/** Contraseña de la versión 1 correcta: se admite cualquiera de los resúmenes que la v1 tenía guardados. */
+function claveAntiguaCorrecta(db, email, clave) {
+  var h = sha256Hex(String(clave || '').trim());
+  if (h === claveAntigua(db, email)) return true;
+  var alt = (db.credenciales_v1_alternativas || {})[norm(email)];
+  return !!alt && h === alt;
+}
+
+function borrarClaveAntigua(db, email) {
+  for (var k in (db.credenciales_profesores || {})) { if (norm(k) === norm(email)) delete db.credenciales_profesores[k]; }
+  if (db.credenciales_v1_alternativas) delete db.credenciales_v1_alternativas[norm(email)];
+}
+
 function fijarClave(email, clave) {
   var sal = Utilities.getUuid();
   propiedades().setProperty('CLAVE_' + norm(email),
@@ -325,7 +467,8 @@ function estadoCuenta(req) {
   var db = leerDb();
   var p = buscarProfesor(db, req.email);
   if (!p) return { ok: true, registrado: false };
-  if (p.estado === 'INACTIVO') return { ok: true, registrado: true, activo: false, motivoBaja: p.motivo_baja || '' };
+  // Sin sesión no se revela el motivo de la baja (puede ser un dato personal)
+  if (p.estado === 'INACTIVO') return { ok: true, registrado: true, activo: false };
   return { ok: true, registrado: true, activo: true, tieneClave: tieneClave(db, req.email) };
 }
 
@@ -341,7 +484,7 @@ function login(req) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var db = leerDb();
+    var db = leerDb(true);
     var p = buscarProfesor(db, email);
     if (!p) fallo('NO_REGISTRADO', 'La cuenta "' + email + '" no figura en el claustro. Debe darla de alta Jefatura de Estudios.');
     if (p.estado === 'INACTIVO') fallo('BAJA', 'La cuenta "' + email + '" está de baja en el centro.');
@@ -354,9 +497,9 @@ function login(req) {
       if (!claveCorrecta(email, clave, guardada)) return claveIncorrecta(email, intentos);
     } else if (antigua) {
       // Contraseña de la versión anterior: comprobar y convertir al formato nuevo
-      if (sha256Hex(clave.trim()) !== antigua) return claveIncorrecta(email, intentos);
+      if (!claveAntiguaCorrecta(db, email, clave)) return claveIncorrecta(email, intentos);
       fijarClave(email, clave);
-      for (var k in db.credenciales_profesores) { if (norm(k) === email) delete db.credenciales_profesores[k]; }
+      borrarClaveAntigua(db, email);
       escribirDb(db);
     } else {
       // Primer acceso: el docente fija su contraseña
@@ -404,14 +547,14 @@ function restablecerClave(req) {
 }
 
 function restablecerClaveBloqueado(req) {
-  var db = leerDb();
+  var db = leerDb(true);
   var s = sesion(req.token, db);
   if (!s.admin) fallo('PROHIBIDO', 'Solo Jefatura o Convivencia pueden restablecer contraseñas.');
   var email = norm(req.email);
   propiedades().deleteProperty('CLAVE_' + email);
   CacheService.getScriptCache().remove('FALLOS_' + email);
   if (claveAntigua(db, email)) {
-    for (var k in db.credenciales_profesores) { if (norm(k) === email) delete db.credenciales_profesores[k]; }
+    borrarClaveAntigua(db, email);
     escribirDb(db);
   }
   registrarAuditoria(db, s.email, 'Docente/' + email, 'Contraseña restablecida: el docente fijará una nueva en su próximo acceso.');
@@ -440,6 +583,7 @@ function registrarAuditoria(db, email, entidad, detalles) {
 function sinCredenciales(db) {
   var copia = JSON.parse(JSON.stringify(db));
   delete copia.credenciales_profesores;
+  delete copia.credenciales_v1_alternativas;
   delete copia.reset_credenciales_emails;
   copia.profesores = (copia.profesores || []).map(function (p) { delete p.password_hash; return p; });
   return copia;
@@ -459,23 +603,42 @@ function esAutor(s, prof) {
   return !!s && !!prof && (s.id_profesor === prof.id_profesor);
 }
 
+// Datos de cada alumno/a que recibe cualquier docente (los de su tutoría los recibe completos)
+var CAMPOS_ALUMNO_DOCENTE = ['id_alumno', 'nie', 'nombre', 'apellidos', 'grupo', 'puntos_actuales', 'estado',
+  'historial_sanciones_count', 'fecha_baja'];
+
 function vistaDocente(db, prof) {
-  var d = sinCredenciales(db);
+  var todo = sinCredenciales(db);
+  // Solo las listas que necesita la app; nada más de la base de datos (configuración, informes...)
+  var d = {};
+  ['profesores', 'alumnos', 'sanciones', 'compensaciones', 'expedientes_sancion', 'deleted_sanciones',
+   'deleted_alumnos', 'deleted_profesores', 'deleted_expedientes'].forEach(function (k) {
+    d[k] = Array.isArray(todo[k]) ? todo[k] : [];
+  });
+  d.timestamp = todo.timestamp;
   // Tutoría: el tutor ve completo todo lo de su grupo (partes, medidas y teléfonos de las familias)
   var grupoTutoria = prof.tutor_de_grupo || '';
   var deMiTutoria = {};
   if (grupoTutoria) {
     d.alumnos.forEach(function (a) { if (a && a.grupo === grupoTutoria) deMiTutoria[a.id_alumno] = true; });
   }
-  d.profesores = d.profesores.map(perfilPublico);
-  d.alumnos = d.alumnos.map(function (a) {
-    var c = JSON.parse(JSON.stringify(a));
-    if (!deMiTutoria[a.id_alumno]) { c.telefono_tutor = ''; c.nombre_tutor = ''; }
+  d.profesores = d.profesores.map(function (p) {
+    var c = perfilPublico(p);
+    if (norm(p.email) !== norm(prof.email)) delete c.motivo_baja;   // el motivo de la baja de otros no
     return c;
   });
+  d.alumnos = d.alumnos.map(function (a) {
+    if (deMiTutoria[a.id_alumno]) return a;
+    var c = soloCampos(a, CAMPOS_ALUMNO_DOCENTE);
+    c.telefono_tutor = ''; c.nombre_tutor = '';
+    return c;
+  });
+  // Aula PAC: el profesorado de guardia ve completos los partes derivados HOY (es lo que muestra
+  // la pantalla del Aula PAC); los de días anteriores, como cualquier parte ajeno
+  var hoy = Utilities.formatDate(new Date(), 'Europe/Madrid', 'yyyy-MM-dd');
   d.sanciones = d.sanciones.map(function (s) {
     if (esAutor(s, prof) || deMiTutoria[s.id_alumno]) return s;
-    if (s.derivado_pac) {
+    if (s.derivado_pac && s.fecha === hoy) {
       var c = JSON.parse(JSON.stringify(s));
       delete c.observaciones_tramitacion; delete c.fecha_comunicacion_familia;
       return c;
@@ -517,7 +680,7 @@ function guardar(req) {
   var lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
-    var db = leerDb();
+    var db = leerDb(true);
     var s = sesion(req.token, db);
     var entrada = asegurarListas(req.data || {});
     var avisos = [];
@@ -530,9 +693,57 @@ function guardar(req) {
 }
 
 /** Jefatura/Convivencia: lo que envía es la referencia, sin perder lo que otros hayan guardado. */
+// Datos que solo gestiona el servidor: nunca se toman de lo que envía la app
+var CLAVES_SERVIDOR = ['credenciales_profesores', 'credenciales_v1_alternativas', 'reset_credenciales_emails',
+  'migracion_v2', 'saldos_antes_v2'];
+
+/**
+ * Lista de lo que la app dice haber cambiado (entrada.cambios). Si existe, de lo demás se conserva
+ * la versión del servidor: así un dispositivo con datos de hace unos segundos no deshace lo que
+ * otro acaba de guardar. Sin esa lista (app antigua) se toma todo lo enviado, como antes.
+ */
+function listaCambios(entrada, clave) {
+  if (!entrada.cambios || !Array.isArray(entrada.cambios[clave])) return null;
+  var m = {};
+  entrada.cambios[clave].forEach(function (x) { if (x) { m[x] = true; m[norm(x)] = true; } });
+  return m;
+}
+
 function fusionAdmin(actual, entrada) {
   var r = entrada;
-  r.credenciales_profesores = actual.credenciales_profesores || {};
+  var cambiosSanciones = listaCambios(entrada, 'sanciones');
+  var cambiosAlumnos = listaCambios(entrada, 'alumnos');
+  var cambiosProfesores = listaCambios(entrada, 'profesores');
+  var cambiosCompensaciones = listaCambios(entrada, 'compensaciones');
+  delete r.cambios;
+  // Lo que la app no conoce (otras claves de la base de datos) se conserva tal cual
+  for (var k in actual) { if (r[k] === undefined) r[k] = actual[k]; }
+  CLAVES_SERVIDOR.forEach(function (k) {
+    if (actual[k] !== undefined) r[k] = actual[k]; else delete r[k];
+  });
+  // Versión del servidor de lo que NO ha cambiado en este dispositivo
+  var conservar = function (lista, mapaActual, idDe, cambios) {
+    if (!cambios) return lista;
+    return lista.map(function (x) {
+      if (!x) return x;
+      var id = idDe(x);
+      if (!cambios[id] && mapaActual[id]) return mapaActual[id];
+      return x;
+    });
+  };
+  var indice = function (lista, idDe) {
+    var m = {};
+    (lista || []).forEach(function (x) { if (x && idDe(x)) m[idDe(x)] = x; });
+    return m;
+  };
+  var idS = function (x) { return x.id_sancion; };
+  var idA = function (x) { return x.id_alumno; };
+  var idP = function (x) { return norm(x.email); };
+  var idC = function (x) { return x.id_compensacion; };
+  r.sanciones = conservar(r.sanciones, indice(actual.sanciones, idS), idS, cambiosSanciones);
+  r.alumnos = conservar(r.alumnos, indice(actual.alumnos, idA), idA, cambiosAlumnos);
+  r.profesores = conservar(r.profesores, indice(actual.profesores, idP), idP, cambiosProfesores);
+  r.compensaciones = conservar(r.compensaciones, indice(actual.compensaciones, idC), idC, cambiosCompensaciones);
   r.deleted_sanciones = unirTombstones(actual.deleted_sanciones, entrada.deleted_sanciones);
   r.deleted_alumnos = unirTombstones(actual.deleted_alumnos, entrada.deleted_alumnos);
   r.deleted_profesores = unirTombstones(actual.deleted_profesores, entrada.deleted_profesores);
@@ -597,6 +808,8 @@ var CAMPOS_PAC = ['estado_pac', 'profesor_pac_receptor', 'hora_llegada_pac'];
  * La tutoría solo si el grupo no tiene ya otro tutor activo; queda anotado que la asignó él.
  */
 function actualizarPerfilPropio(r, entrada, s, avisos) {
+  var cambiosProf = listaCambios(entrada, 'profesores');
+  if (cambiosProf && !cambiosProf[s.email]) return;   // no ha tocado su perfil en este envío
   var propio = null;
   (entrada.profesores || []).forEach(function (p) { if (p && norm(p.email) === s.email) propio = p; });
   if (!propio) return;
@@ -641,16 +854,24 @@ function fusionDocente(actual, entrada, s, avisos) {
   var yaBorradas = {};
   r.deleted_sanciones.forEach(function (id) { yaBorradas[id] = true; });
 
+  var cambios = listaCambios(entrada, 'sanciones');
+  var nombrePropio = ((s.prof.nombre || '') + ' ' + (s.prof.apellidos || '')).trim();
   entrada.sanciones.forEach(function (x) {
     if (!x || !x.id_sancion || yaBorradas[x.id_sancion]) return;
     var i = porId[x.id_sancion];
     if (i === undefined) {
-      // Parte nuevo: solo si lo firma el propio docente
-      if (esAutor(x, s.prof)) { r.sanciones.push(x); porId[x.id_sancion] = r.sanciones.length - 1; }
+      // Parte nuevo: solo si lo firma el propio docente (y con su nombre real)
+      if (esAutor(x, s.prof)) {
+        if (nombrePropio) x.nombre_profesor = nombrePropio;
+        r.sanciones.push(x); porId[x.id_sancion] = r.sanciones.length - 1;
+      }
       return;
     }
+    // Un parte existente que este dispositivo no ha tocado no se modifica (evita deshacer cambios ajenos)
+    if (cambios && !cambios[x.id_sancion]) return;
     var existente = r.sanciones[i];
     if (esAutor(existente, s.prof) && esAutor(x, s.prof)) {
+      if (nombrePropio) x.nombre_profesor = nombrePropio;
       r.sanciones[i] = x; // su propio parte: puede modificarlo
     } else if (existente.derivado_pac) {
       CAMPOS_PAC.forEach(function (c) { if (x[c] !== undefined) existente[c] = x[c]; });
