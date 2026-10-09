@@ -55,6 +55,8 @@ Procedimiento acordado (8/10/2026), unos 60–90 min, fuera del horario de clase
 1. [Claude, ~30–45 min] Preparar producción: en el servidor v2, al primer uso, **copia de seguridad
    automática** del JSON en la carpeta de Drive y **foto de los saldos actuales**; pantalla de
    **informe de cambios de saldo** para Jefatura; generar el servidor de producción y probarlo.
+   Comprobar también que todos los partes reales tienen un `id_profesor` que corresponde a un docente
+   existente ("Mis partes" y los permisos se basan solo en ese identificador, nunca en el nombre).
 2. [Miguel Ángel, ~10 min] En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`:
    pegar el servidor de producción y crear una **implementación NUEVA** (no editar la actual, para que
    la app en uso siga funcionando). Pasar a Claude la dirección `/exec` nueva.

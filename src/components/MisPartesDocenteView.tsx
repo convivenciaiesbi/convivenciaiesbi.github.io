@@ -110,18 +110,10 @@ export const MisPartesDocenteView: React.FC<MisPartesDocenteViewProps> = ({
   };
 
   // Sanciones impuestas por este profesor concreto
-  // Identifica por id_profesor o por coincidencia de nombre/apellidos
+  // Solo por el identificador único del docente (nunca por nombre: puede haber homónimos)
   const misPartes = useMemo(() => {
-    const cleanUserName = (currentUser.nombre || '').toLowerCase().trim();
-    const cleanUserSurname = (currentUser.apellidos || '').toLowerCase().trim();
-
-    return sanciones.filter(s => {
-      if (s.id_profesor === currentUser.id_profesor) return true;
-      const profName = (s.nombre_profesor || '').toLowerCase();
-      if (cleanUserName && profName.includes(cleanUserName)) return true;
-      if (cleanUserSurname && profName.includes(cleanUserSurname)) return true;
-      return false;
-    });
+    if (!currentUser.id_profesor) return [];
+    return sanciones.filter(s => s.id_profesor === currentUser.id_profesor);
   }, [sanciones, currentUser]);
 
   // Filtrado reactivo
