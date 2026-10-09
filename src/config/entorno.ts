@@ -12,7 +12,7 @@
 
 export type Entorno = 'PRUEBAS' | 'PRODUCCION';
 
-export const ENTORNO: Entorno = 'PRUEBAS';
+export const ENTORNO: Entorno = 'PRUEBAS' as Entorno; // 'PRUEBAS' o 'PRODUCCION'
 
 interface ConfigDrive {
   urlApi: string;
