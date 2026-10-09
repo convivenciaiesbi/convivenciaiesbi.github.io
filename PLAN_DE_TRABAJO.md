@@ -50,35 +50,38 @@ La app en uso (`convivenciaiesbi.github.io`) no se toca hasta el paso final.
 > **recuperará puntos de golpe** al activar esta versión. Avisar a Jefatura y preparar
 > antes un listado comparando el saldo actual y el nuevo de cada alumno.
 
-Procedimiento acordado (8/10/2026), unos 60–90 min, fuera del horario de clase:
+Procedimiento (revisado el 9/10/2026 tras las pruebas de producción):
 
-1. [Claude, ~30–45 min] Preparar producción: en el servidor v2, al primer uso, **copia de seguridad
-   automática** del JSON en la carpeta de Drive y **foto de los saldos actuales**; pantalla de
-   **informe de cambios de saldo** para Jefatura; generar el servidor de producción y probarlo.
-   Comprobar también que todos los partes reales tienen un `id_profesor` que corresponde a un docente
-   existente ("Mis partes" y los permisos se basan solo en ese identificador, nunca en el nombre).
-   **Partes perdidos**: la app v1 podía borrar partes (un dispositivo con datos atrasados pisaba a otro;
-   duplicados por número de expediente). Comparar el JSON actual con las versiones anteriores de Drive y
-   las copias de seguridad, y sacar la lista de partes que existieron y ya no están. **No recuperar nada
-   sin preguntar antes a Miguel Ángel**: él decide con Jefatura cuáles se restauran (alguno pudo
-   borrarse a propósito).
-   Situación (9/10/2026): Miguel Ángel ve 41 partes y cree que deberían ser más. No hay copias de
-   seguridad en la carpeta; sí hay muchas versiones del JSON en Drive (caducan a los 30 días salvo
-   "Conservar para siempre"; la descarga de versiones está bloqueada en la cuenta del centro).
-   Pendiente de Miguel Ángel: conservar las versiones más antiguas y una por semana; contar los partes
-   en otro dispositivo/incógnito como Jefatura. Pendiente de Claude: leer las versiones desde el
-   servidor v2 (servicio avanzado de Drive) y contar partes por versión.
-2. [Miguel Ángel, ~10 min] En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`:
-   pegar el servidor de producción y crear una **implementación NUEVA** (no editar la actual, para que
-   la app en uso siga funcionando). Pasar a Claude la dirección `/exec` nueva.
-3. [Claude, ~10 min] Poner esa dirección y `ENTORNO = 'PRODUCCION'`, publicar en
-   `convivenciaiesbi/convivenciaiesbi.github.io` y comprobar la publicación.
-4. [Miguel Ángel, ~10–15 min] Entrar en la app real y comprobar datos y funcionamiento.
-5. [Miguel Ángel, 1 min] Solo si todo va bien: **archivar la implementación antigua** (cierra la
-   exposición de datos). Hasta entonces, vuelta atrás posible en ~5 min republicando la web anterior.
+Preparado por Claude (hecho):
+- Servidor de producción `Servidor_PRODUCCION_v2.gs`. Al primer uso: copia de seguridad exacta del
+  JSON (`COPIA_SEGURIDAD_ANTES_V2_<fecha>.json`), contraseñas de la v1 unificadas (siguen valiendo),
+  foto de los saldos de la v1. Si el archivo no se encuentra o no se puede leer, se detiene sin escribir.
+- Informe para Jefatura en la app (franja morada): saldos antes/después (CSV e impresión), partes que la
+  v1 tenía marcados como borrados pero seguían en el archivo (botón «Recuperar», decide Jefatura) y
+  partes sin docente reconocido.
+- Pruebas: `pruebas/servidor/*.test.mts` (migración v1, seguridad, concurrencia, día del cambio).
 
-Avisar a Jefatura de los saldos (recordatorio de arriba) y de que todo el profesorado tendrá que
-volver a iniciar sesión (con su contraseña de siempre).
+Antes del cambio (Miguel Ángel, 5 min):
+- En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`, comprobar el valor de
+  `var ID_CARPETA_DRIVE = '...'` del código actual y pasárselo a Claude (el servidor nuevo debe usar la
+  misma carpeta; si no coincide con `1S5zjeSgcfVkL-eoQLsJ9I_ltHAnRrbaS`, Claude regenera el servidor).
+- En Implementar > Gestionar implementaciones: confirmar que la activa es la que termina en `...HimLNQ`.
+
+El cambio (~20 min, sin profesorado trabajando):
+1. [Miguel Ángel] Sustituir todo el código del proyecto por `Servidor_PRODUCCION_v2.gs` y guardar.
+2. [Miguel Ángel] Gestionar implementaciones > implementación activa (`...HimLNQ`) > Editar (lápiz) >
+   Versión: «Nueva versión» > Implementar. **Misma dirección /exec**: la app antigua deja de poder leer
+   o escribir en ese momento (se cierra la exposición de datos). Archivar cualquier OTRA implementación
+   activa que quede (versiones antiguas del servidor).
+3. [Claude] Publicar la app nueva (`ENTORNO = 'PRODUCCION'`) en `convivenciaiesbi/convivenciaiesbi.github.io`
+   (avance rápido desde su historial, sin forzar). Entre los pasos 2 y 3 (~3 min) la web antigua no carga datos.
+4. [Miguel Ángel] Abrir la app (Ctrl+Shift+R), entrar con su contraseña de siempre, comprobar partes,
+   informe y que en la carpeta de Drive aparece la copia de seguridad.
+5. Vuelta atrás si algo va mal: editar la implementación y elegir la versión anterior; Claude vuelve a
+   publicar la web antigua y guía para restaurar el contenido del JSON desde la copia de seguridad.
+
+Avisos: Jefatura (saldos que suben, informe); todo el profesorado vuelve a iniciar sesión con su
+contraseña de siempre; quien tuviera la contraseña restablecida en la app antigua fijará una nueva.
 
 ## ✨ Fase 3 – Nuevas funcionalidades
 
