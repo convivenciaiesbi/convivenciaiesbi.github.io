@@ -62,6 +62,12 @@ Procedimiento acordado (8/10/2026), unos 60–90 min, fuera del horario de clase
    las copias de seguridad, y sacar la lista de partes que existieron y ya no están. **No recuperar nada
    sin preguntar antes a Miguel Ángel**: él decide con Jefatura cuáles se restauran (alguno pudo
    borrarse a propósito).
+   Situación (9/10/2026): Miguel Ángel ve 41 partes y cree que deberían ser más. No hay copias de
+   seguridad en la carpeta; sí hay muchas versiones del JSON en Drive (caducan a los 30 días salvo
+   "Conservar para siempre"; la descarga de versiones está bloqueada en la cuenta del centro).
+   Pendiente de Miguel Ángel: conservar las versiones más antiguas y una por semana; contar los partes
+   en otro dispositivo/incógnito como Jefatura. Pendiente de Claude: leer las versiones desde el
+   servidor v2 (servicio avanzado de Drive) y contar partes por versión.
 2. [Miguel Ángel, ~10 min] En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`:
    pegar el servidor de producción y crear una **implementación NUEVA** (no editar la actual, para que
    la app en uso siga funcionando). Pasar a Claude la dirección `/exec` nueva.
