@@ -57,6 +57,11 @@ Procedimiento acordado (8/10/2026), unos 60–90 min, fuera del horario de clase
    **informe de cambios de saldo** para Jefatura; generar el servidor de producción y probarlo.
    Comprobar también que todos los partes reales tienen un `id_profesor` que corresponde a un docente
    existente ("Mis partes" y los permisos se basan solo en ese identificador, nunca en el nombre).
+   **Partes perdidos**: la app v1 podía borrar partes (un dispositivo con datos atrasados pisaba a otro;
+   duplicados por número de expediente). Comparar el JSON actual con las versiones anteriores de Drive y
+   las copias de seguridad, y sacar la lista de partes que existieron y ya no están. **No recuperar nada
+   sin preguntar antes a Miguel Ángel**: él decide con Jefatura cuáles se restauran (alguno pudo
+   borrarse a propósito).
 2. [Miguel Ángel, ~10 min] En el proyecto Apps Script de `14007180.aplicaciones@g.educaand.es`:
    pegar el servidor de producción y crear una **implementación NUEVA** (no editar la actual, para que
    la app en uso siga funcionando). Pasar a Claude la dirección `/exec` nueva.
